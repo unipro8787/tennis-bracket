@@ -369,7 +369,7 @@
       </div>
       <div class="option-field">
         <label for="gamesInput">인당 보장 경기 수</label>
-        <input type="number" id="gamesInput" min="1" placeholder="자동">
+        <input type="number" id="gamesInput" min="1" value="3" placeholder="자동">
       </div>
     </div>
     <div class="row-actions" style="margin-top:18px;">
@@ -519,7 +519,7 @@
       return false;
     }
     const courts = Math.max(1, parseInt(document.getElementById('courtsInput').value) || 1);
-    const targetGames = parseInt(document.getElementById('gamesInput').value) || 4;
+    const targetGames = parseInt(document.getElementById('gamesInput').value) || 3;
     const { rounds, courtsUsed } = buildRotatingSchedule(shuffle(players), courts, targetGames);
     renderSchedule(rounds, players.length, courts, courtsUsed);
 
