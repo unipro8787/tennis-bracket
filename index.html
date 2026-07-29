@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>테니스 복식조 편성기</title>
+<style>
+  :root {
+    --court-green: #1f7a4d;
+    --court-green-dark: #145c39;
+    --court-green-soft: #e4f1e9;
+    --line-white: #f5f5f0;
+    --clay: #c1542c;
+    --clay-dark: #9c4020;
+    --ball: #c7d94a;
+    --ink: #17241c;
+    --muted: #5f6f66;
+    --bg: #f2f6f1;
+    --card-bg: #ffffff;
+    --border: #dde4da;
+    --shadow: 0 1px 2px rgba(23, 36, 28, 0.04), 0 8px 24px rgba(23, 36, 28, 0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --court-green-soft: #163425;
+      --bg: #10160f;
+      --card-bg: #182018;
+      --ink: #e9f0e6;
+      --muted: #97a89d;
+      --border: #293429;
+      --shadow: 0 1px 2px rgba(0,0,0,0.2), 0 8px 24px rgba(0,0,0,0.24);
+    }
+  }
+  :root[data-theme="dark"] {
+    --court-green-soft: #163425;
+    --bg: #10160f;
+    --card-bg: #182018;
+    --ink: #e9f0e6;
+    --muted: #97a89d;
+    --border: #293429;
+    --shadow: 0 1px 2px rgba(0,0,0,0.2), 0 8px 24px rgba(0,0,0,0.24);
+  }
+  :root[data-theme="light"] {
+    --court-green-soft: #e4f1e9;
+    --bg: #f2f6f1;
+    --card-bg: #ffffff;
+    --ink: #17241c;
+    --muted: #5f6f66;
+    --border: #dde4da;
+    --shadow: 0 1px 2px rgba(23, 36, 28, 0.04), 0 8px 24px rgba(23, 36, 28, 0.05);
+  }
+  * { box-sizing: border-box; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif;
+    background: var(--bg);
+    background-image:
+      linear-gradient(var(--bg), var(--bg)),
+      repeating-linear-gradient(90deg, transparent 0 79px, color-mix(in srgb, var(--court-green) 6%, transparent) 79px 80px);
+    background-blend-mode: normal;
+    color: var(--ink);
+    line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 32px 20px 80px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 4px;
+  }
+  header .logo {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    background: linear-gradient(155deg, var(--court-green) 0%, var(--court-green-dark) 100%);
+    box-shadow: var(--shadow);
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+  }
+  header .logo svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  h1 {
+    font-size: 1.55rem;
+    margin: 0;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .sub { color: var(--muted); margin: 6px 0 30px; font-size: 0.93rem; max-width: 62ch; }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px 22px 24px;
+    margin-bottom: 18px;
+    box-shadow: var(--shadow);
+  }
+  .card h2 {
+    font-size: 1.02rem;
+    margin: 0 0 16px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-weight: 700;
+  }
+  .step-num {
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: var(--court-green);
+    background: var(--court-green-soft);
+    border-radius: 999px;
+    padding: 2px 8px;
+    flex-shrink: 0;
+  }
+
+  #playerList { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+  .player-row {
+    display: grid;
+    grid-template-columns: 24px 1fr auto 32px;
+    gap: 10px;
+    align-items: center;
+  }
+  .player-row .idx { color: var(--muted); font-size: 0.82rem; text-align: center; font-weight: 600; }
+  input[type="text"] {
+    width: 100%;
+    padding: 9px 11px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 0.95rem;
+    transition: outline-color 0.12s ease;
+  }
+  input[type="text"]:focus-visible {
+    outline: 2px solid var(--court-green);
+    outline-offset: -1px;
+  }
+
+  .level-picker {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 6px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .level-dot {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+    transition: transform 0.1s ease, background 0.15s ease, border-color 0.15s ease;
+  }
+  .level-dot:hover { transform: scale(1.12); }
+  .level-dot:focus-visible { outline: 2px solid var(--court-green); outline-offset: 2px; }
+  .level-dot[data-value="1"].filled { background: var(--court-green); border-color: var(--court-green); }
+  .level-dot[data-value="2"].filled { background: #4a9a63; border-color: #4a9a63; }
+  .level-dot[data-value="3"].filled { background: var(--ball); border-color: var(--ball); }
+  .level-dot[data-value="4"].filled { background: #d98a4f; border-color: #d98a4f; }
+  .level-dot[data-value="5"].filled { background: var(--clay); border-color: var(--clay); }
+
+  .remove-btn {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  }
+  .remove-btn:hover { background: color-mix(in srgb, var(--clay) 12%, transparent); border-color: var(--clay); color: var(--clay); }
+
+  .level-legend {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin: 2px 0 14px;
+  }
+  .level-legend .lg-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  .row-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  button.btn {
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: none;
+    font-size: 0.92rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.12s ease, transform 0.06s ease, opacity 0.12s ease;
+  }
+  button.btn:active { transform: translateY(1px); }
+  button.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+  .btn-secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--ink);
+  }
+  .btn-secondary:hover { background: var(--bg); }
+  .btn-primary {
+    background: var(--court-green);
+    color: white;
+  }
+  .btn-primary:hover { background: var(--court-green-dark); }
+  .btn-accent {
+    background: var(--clay);
+    color: white;
+  }
+  .btn-accent:hover:not(:disabled) { background: var(--clay-dark); }
+
+  .options { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 4px; }
+  .option-field { display: flex; flex-direction: column; gap: 6px; }
+  .option-field label { font-size: 0.82rem; color: var(--muted); }
+  .option-field input[type="number"] {
+    width: 90px;
+    padding: 9px 10px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 0.95rem;
+  }
+  .option-field input[type="number"]:focus-visible { outline: 2px solid var(--court-green); outline-offset: -1px; }
+
+  .teams-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 12px;
+    animation: rise 0.25s ease both;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .team-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    background: var(--bg);
+  }
+  .team-card .team-name {
+    font-weight: 800;
+    font-size: 0.74rem;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .team-card .members { font-size: 1rem; font-weight: 600; margin-bottom: 6px; }
+  .team-card .sum {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .team-balance-bar {
+    height: 5px;
+    border-radius: 999px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .team-balance-bar .fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--court-green), var(--clay));
+    border-radius: 999px;
+  }
+  .bye-note {
+    font-size: 0.85rem;
+    color: var(--clay-dark);
+    margin-top: 12px;
+  }
+  .balance-note {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 14px;
+  }
+
+  .round-block { margin-bottom: 18px; animation: rise 0.25s ease both; }
+  .round-block:last-child { margin-bottom: 0; }
+  .table-scroll { overflow-x: auto; }
+  table.match-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+  }
+  table.match-table th, table.match-table td {
+    text-align: left;
+    padding: 9px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.match-table th { color: var(--muted); font-weight: 600; font-size: 0.78rem; }
+  table.match-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--court-green) 4%, transparent); }
+  .court-chip {
+    display: inline-flex;
+    min-width: 1.6em;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.78rem;
+    color: var(--court-green-dark);
+    background: var(--court-green-soft);
+    border-radius: 999px;
+    padding: 3px 8px;
+  }
+  .round-label {
+    display: inline-block;
+    background: var(--court-green);
+    color: white;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 3px 10px;
+    border-radius: 999px;
+    margin-bottom: 8px;
+  }
+
+  .empty-hint {
+    color: var(--muted);
+    font-size: 0.9rem;
+    padding: 8px 0;
+  }
+
+  @media (max-width: 480px) {
+    .player-row { grid-template-columns: 20px 1fr auto 30px; gap: 6px; }
+    .level-picker { padding: 3px 4px; gap: 4px; }
+    .level-dot { width: 18px; height: 18px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">
+      <svg viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="6" y="9" width="32" height="26" rx="2" stroke="#eef7f1" stroke-width="1.6"/>
+        <line x1="22" y1="9" x2="22" y2="35" stroke="#eef7f1" stroke-width="1.6"/>
+        <line x1="6" y1="22" x2="38" y2="22" stroke="#eef7f1" stroke-width="1.2" stroke-dasharray="2 2"/>
+        <rect x="11" y="14" width="11" height="16" rx="1" stroke="#eef7f1" stroke-width="1.1" opacity="0.8"/>
+        <rect x="22" y="14" width="11" height="16" rx="1" stroke="#eef7f1" stroke-width="1.1" opacity="0.8"/>
+      </svg>
+    </div>
+    <h1>테니스 복식조 편성기</h1>
+  </header>
+  <p class="sub">선수 이름과 실력 레벨을 입력하면, 실력이 균형 잡히도록 복식조를 자동으로 편성하고 대진표를 만들어 드립니다.</p>
+
+  <div class="card">
+    <h2><span class="step-num">01</span>선수 명단</h2>
+    <div id="playerList"></div>
+    <div class="level-legend">
+      <span>레벨</span>
+      <span class="lg-dot" style="background:var(--court-green)"></span>초급
+      <span style="color:var(--border)">—</span>
+      <span class="lg-dot" style="background:var(--clay)"></span>상급
+    </div>
+    <div class="row-actions">
+      <button class="btn btn-secondary" id="addPlayerBtn" type="button">+ 선수 추가</button>
+      <button class="btn btn-secondary" id="fillSampleBtn" type="button">예시 채우기</button>
+      <button class="btn btn-secondary" id="clearBtn" type="button">전체 지우기</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-num">02</span>편성 옵션</h2>
+    <div class="options">
+      <div class="option-field">
+        <label for="courtsInput">사용 가능 코트 수</label>
+        <input type="number" id="courtsInput" min="1" value="1">
+      </div>
+    </div>
+    <div class="row-actions" style="margin-top:18px;">
+      <button class="btn btn-primary" id="formTeamsBtn" type="button">복식조 편성하기</button>
+      <button class="btn btn-accent" id="formScheduleBtn" type="button" disabled>대진표 생성하기</button>
+    </div>
+  </div>
+
+  <div class="card" id="teamsCard" style="display:none;">
+    <h2><span class="step-num">03</span>편성 결과</h2>
+    <div class="teams-grid" id="teamsGrid"></div>
+    <div class="balance-note" id="balanceNote"></div>
+    <div class="bye-note" id="byeNote"></div>
+  </div>
+
+  <div class="card" id="scheduleCard" style="display:none;">
+    <h2><span class="step-num">04</span>대진표 (라운드로빈)</h2>
+    <div id="scheduleContent"></div>
+  </div>
+
+</div>
+
+<script>
+  const playerListEl = document.getElementById('playerList');
+  const teamsCard = document.getElementById('teamsCard');
+  const teamsGrid = document.getElementById('teamsGrid');
+  const balanceNote = document.getElementById('balanceNote');
+  const byeNote = document.getElementById('byeNote');
+  const scheduleCard = document.getElementById('scheduleCard');
+  const scheduleContent = document.getElementById('scheduleContent');
+  const formScheduleBtn = document.getElementById('formScheduleBtn');
+
+  let currentTeams = [];
+  let rowCounter = 0;
+
+  function buildLevelPicker(initialLevel) {
+    const picker = document.createElement('div');
+    picker.className = 'level-picker';
+    picker.setAttribute('role', 'group');
+    picker.setAttribute('aria-label', '실력 레벨 (1~5)');
+    picker.dataset.level = String(initialLevel);
+    for (let v = 1; v <= 5; v++) {
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.className = 'level-dot';
+      dot.dataset.value = String(v);
+      dot.setAttribute('aria-label', `레벨 ${v}`);
+      dot.addEventListener('click', () => setLevelPicker(picker, v));
+      picker.appendChild(dot);
+    }
+    setLevelPicker(picker, initialLevel);
+    return picker;
+  }
+
+  function setLevelPicker(picker, value) {
+    picker.dataset.level = String(value);
+    picker.querySelectorAll('.level-dot').forEach(dot => {
+      const v = parseInt(dot.dataset.value, 10);
+      dot.classList.toggle('filled', v <= value);
+      dot.setAttribute('aria-pressed', v === value ? 'true' : 'false');
+    });
+  }
+
+  function addPlayerRow(name = '', level = 3) {
+    rowCounter += 1;
+    const row = document.createElement('div');
+    row.className = 'player-row';
+    row.dataset.rowId = rowCounter;
+
+    const idx = document.createElement('div');
+    idx.className = 'idx';
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'name-input';
+    nameInput.placeholder = '이름';
+    nameInput.value = name;
+
+    const picker = buildLevelPicker(level);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'remove-btn';
+    removeBtn.title = '삭제';
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', () => {
+      row.remove();
+      renumberRows();
+    });
+
+    row.append(idx, nameInput, picker, removeBtn);
+    playerListEl.appendChild(row);
+    renumberRows();
+  }
+
+  function renumberRows() {
+    const rows = playerListEl.querySelectorAll('.player-row');
+    rows.forEach((row, i) => {
+      row.querySelector('.idx').textContent = i + 1;
+    });
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function getPlayers() {
+    const rows = playerListEl.querySelectorAll('.player-row');
+    const players = [];
+    rows.forEach(row => {
+      const name = row.querySelector('.name-input').value.trim();
+      const level = parseInt(row.querySelector('.level-picker').dataset.level, 10);
+      if (name && !isNaN(level)) {
+        players.push({ name, level });
+      }
+    });
+    return players;
+  }
+
+  document.getElementById('addPlayerBtn').addEventListener('click', () => addPlayerRow());
+
+  document.getElementById('fillSampleBtn').addEventListener('click', () => {
+    playerListEl.innerHTML = '';
+    const sample = [
+      ['민준', 5], ['서연', 2], ['도윤', 4], ['하윤', 2],
+      ['시우', 3], ['지안', 3], ['예준', 4], ['수아', 1],
+      ['주원', 5], ['다은', 1]
+    ];
+    sample.forEach(([n, l]) => addPlayerRow(n, l));
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    playerListEl.innerHTML = '';
+    teamsCard.style.display = 'none';
+    scheduleCard.style.display = 'none';
+    formScheduleBtn.disabled = true;
+  });
+
+  document.getElementById('formTeamsBtn').addEventListener('click', () => {
+    const players = getPlayers();
+    if (players.length < 2) {
+      alert('최소 2명 이상의 선수를 입력해주세요.');
+      return;
+    }
+
+    const sorted = [...players].sort((a, b) => b.level - a.level);
+
+    let bye = null;
+    let pool = sorted;
+    if (pool.length % 2 !== 0) {
+      bye = pool[Math.floor(pool.length / 2)];
+      pool = pool.filter(p => p !== bye);
+    }
+
+    const n = pool.length;
+    const teams = [];
+    for (let i = 0; i < n / 2; i++) {
+      const a = pool[i];
+      const b = pool[n - 1 - i];
+      teams.push({
+        name: `${a.name} · ${b.name}`,
+        members: [a, b],
+        sum: a.level + b.level
+      });
+    }
+
+    currentTeams = teams;
+    renderTeams(teams, bye);
+
+    teamsCard.style.display = 'block';
+    formScheduleBtn.disabled = teams.length < 2;
+    scheduleCard.style.display = 'none';
+    teamsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
+  function renderTeams(teams, bye) {
+    teamsGrid.innerHTML = '';
+    const maxSum = teams.length ? Math.max(...teams.map(t => t.sum)) : 1;
+    teams.forEach((t, i) => {
+      const div = document.createElement('div');
+      div.className = 'team-card';
+      const pct = Math.max(12, Math.round((t.sum / maxSum) * 100));
+      div.innerHTML = `
+        <div class="team-name">TEAM ${i + 1}</div>
+        <div class="members">${escapeHtml(t.members[0].name)} &amp; ${escapeHtml(t.members[1].name)}</div>
+        <div class="sum">레벨 합계: ${t.sum} (${t.members[0].level} + ${t.members[1].level})</div>
+        <div class="team-balance-bar"><div class="fill" style="width:${pct}%"></div></div>
+      `;
+      teamsGrid.appendChild(div);
+    });
+
+    if (teams.length > 0) {
+      const sums = teams.map(t => t.sum);
+      const max = Math.max(...sums);
+      const min = Math.min(...sums);
+      balanceNote.textContent = `팀 간 레벨 합계 차이: 최대 ${max} / 최소 ${min} (편차 ${max - min})`;
+    } else {
+      balanceNote.textContent = '';
+    }
+
+    byeNote.textContent = bye ? `※ 인원이 홀수라 ${bye.name}님은 이번 편성에서 제외(부전)되었습니다.` : '';
+  }
+
+  document.getElementById('formScheduleBtn').addEventListener('click', () => {
+    if (currentTeams.length < 2) return;
+    const courts = Math.max(1, parseInt(document.getElementById('courtsInput').value) || 1);
+    const rounds = roundRobinSchedule(currentTeams);
+    renderSchedule(rounds, courts);
+    scheduleCard.style.display = 'block';
+    scheduleCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
+  function roundRobinSchedule(teams) {
+    let list = teams.map((t, i) => ({ ...t, idx: i }));
+    if (list.length % 2 !== 0) {
+      list = [...list, { name: 'BYE', bye: true }];
+    }
+    const n = list.length;
+    const rounds = [];
+    const fixed = list[0];
+    let rest = list.slice(1);
+
+    for (let r = 0; r < n - 1; r++) {
+      const roundTeams = [fixed, ...rest];
+      const matches = [];
+      for (let i = 0; i < n / 2; i++) {
+        const home = roundTeams[i];
+        const away = roundTeams[n - 1 - i];
+        if (!home.bye && !away.bye) {
+          matches.push([home, away]);
+        }
+      }
+      rounds.push(matches);
+      rest.unshift(rest.pop());
+    }
+    return rounds;
+  }
+
+  function renderSchedule(rounds, courts) {
+    let html = '';
+    rounds.forEach((matches, ri) => {
+      html += `<div class="round-block">`;
+      html += `<span class="round-label">ROUND ${ri + 1}</span>`;
+      html += `<div class="table-scroll"><table class="match-table"><thead><tr><th>코트</th><th>대진</th></tr></thead><tbody>`;
+      matches.forEach((m, mi) => {
+        const court = (mi % courts) + 1;
+        html += `<tr><td><span class="court-chip">${court}</span></td><td>${escapeHtml(m[0].name)} <strong>vs</strong> ${escapeHtml(m[1].name)}</td></tr>`;
+      });
+      if (matches.length === 0) {
+        html += `<tr><td colspan="2" class="empty-hint">이번 라운드는 경기가 없습니다.</td></tr>`;
+      }
+      html += `</tbody></table></div></div>`;
+    });
+    scheduleContent.innerHTML = html;
+  }
+
+  // start with a few empty rows
+  addPlayerRow();
+  addPlayerRow();
+  addPlayerRow();
+  addPlayerRow();
+</script>
+</body>
+</html>
