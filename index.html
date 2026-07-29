@@ -59,7 +59,7 @@
     background: var(--bg);
     background-image:
       linear-gradient(var(--bg), var(--bg)),
-      repeating-linear-gradient(90deg, transparent 0 79px, color-mix(in srgb, var(--court-green) 6%, transparent) 79px 80px);
+      repeating-linear-gradient(90deg, transparent 0 79px, rgba(31, 122, 77, 0.06) 79px 80px);
     background-blend-mode: normal;
     color: var(--ink);
     line-height: 1.5;
@@ -181,7 +181,7 @@
     line-height: 1;
     transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   }
-  .remove-btn:hover { background: color-mix(in srgb, var(--clay) 12%, transparent); border-color: var(--clay); color: var(--clay); }
+  .remove-btn:hover { background: rgba(193, 84, 44, 0.12); border-color: var(--clay); color: var(--clay); }
 
   .level-legend {
     display: flex;
@@ -251,7 +251,7 @@
     border-bottom: 1px solid var(--border);
   }
   table.match-table th { color: var(--muted); font-weight: 600; font-size: 0.78rem; }
-  table.match-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--court-green) 4%, transparent); }
+  table.match-table tbody tr:nth-child(even) { background: rgba(31, 122, 77, 0.04); }
   .court-chip {
     display: inline-flex;
     min-width: 1.6em;
@@ -510,18 +510,52 @@
 
     const grid = document.createElement('div');
     grid.style.cssText = `display:grid;grid-template-columns:repeat(${cols}, 1fr);gap:${gap}px;align-items:start;`;
-    blocks.forEach(block => grid.appendChild(block.cloneNode(true)));
+    blocks.forEach(block => {
+      const clone = block.cloneNode(true);
+      // cloned nodes replay the round-block fade-in animation from scratch;
+      // freeze it so html2canvas doesn't capture a mid-fade (near-invisible) frame
+      clone.style.animation = 'none';
+      clone.style.opacity = '1';
+      grid.appendChild(clone);
+    });
     wrap.appendChild(grid);
 
     document.body.appendChild(wrap);
     return wrap;
   }
 
+  // full-screen preview so the user can long-press (mobile) or right-click (desktop)
+  // to save the image — this works even in restrictive in-app browsers where
+  // share/download APIs are blocked or silently fail.
+  function openImagePreview(dataUrl) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,14,10,0.92);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;';
+
+    const hint = document.createElement('div');
+    hint.textContent = '이미지를 길게 누르거나(모바일) 우클릭(PC)해서 저장하세요';
+    hint.style.cssText = 'color:#fff;font-size:0.9rem;text-align:center;';
+
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    img.alt = '대진표';
+    img.style.cssText = 'max-width:100%;max-height:70vh;border-radius:10px;background:#fff;';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = '닫기';
+    closeBtn.className = 'btn btn-secondary';
+    closeBtn.addEventListener('click', () => overlay.remove());
+
+    overlay.append(hint, img, closeBtn);
+    document.body.appendChild(overlay);
+  }
+
   document.getElementById('saveImageBtn').addEventListener('click', () => {
     const captureEl = buildScheduleCaptureEl();
     const bg = getComputedStyle(scheduleCard).backgroundColor;
-    html2canvas(captureEl, { backgroundColor: bg }).then(async canvas => {
+    html2canvas(captureEl, { backgroundColor: bg }).then(canvas => {
       document.body.removeChild(captureEl);
+      const dataUrl = canvas.toDataURL('image/png');
       const today = new Date().toISOString().slice(0, 10);
       const filename = `대진표_${today}.png`;
 
@@ -535,10 +569,7 @@
             if (err && err.name === 'AbortError') return;
           }
         }
-        const link = document.createElement('a');
-        link.download = filename;
-        link.href = URL.createObjectURL(blob);
-        link.click();
+        openImagePreview(dataUrl);
       }, 'image/png');
     });
   });
