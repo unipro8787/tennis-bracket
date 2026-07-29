@@ -796,14 +796,65 @@
     return lines.join('\n');
   }
 
-  document.getElementById('saveResultsBtn').addEventListener('click', () => {
+  // full-screen text preview with a copy button, for when share/download
+  // APIs are blocked or silently fail (e.g. restrictive in-app browsers).
+  function openTextPreview(text) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,14,10,0.92);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;';
+
+    const hint = document.createElement('div');
+    hint.textContent = '아래 내용을 길게 눌러 전체 선택 후 복사하거나, 복사 버튼을 눌러주세요';
+    hint.style.cssText = 'color:#fff;font-size:0.9rem;text-align:center;';
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.readOnly = true;
+    textarea.style.cssText = 'width:min(480px,90vw);max-height:60vh;flex:1;border-radius:10px;border:none;padding:14px;font-size:0.85rem;line-height:1.5;background:#fff;color:#17241c;';
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:10px;';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.textContent = '복사';
+    copyBtn.className = 'btn btn-accent';
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = '복사됨!';
+      } catch (err) {
+        textarea.focus();
+        textarea.select();
+      }
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = '닫기';
+    closeBtn.className = 'btn btn-secondary';
+    closeBtn.addEventListener('click', () => overlay.remove());
+
+    btnRow.append(copyBtn, closeBtn);
+    overlay.append(hint, textarea, btnRow);
+    document.body.appendChild(overlay);
+  }
+
+  document.getElementById('saveResultsBtn').addEventListener('click', async () => {
     const text = buildResultsText();
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const today = new Date().toISOString().slice(0, 10);
-    const link = document.createElement('a');
-    link.download = `대진표_결과_${today}.txt`;
-    link.href = URL.createObjectURL(blob);
-    link.click();
+    const filename = `대진표_결과_${today}.txt`;
+
+    const file = new File([text], filename, { type: 'text/plain' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+      }
+    }
+
+    openTextPreview(text);
   });
 
   // default roster
