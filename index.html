@@ -280,18 +280,24 @@
     margin-bottom: 8px;
   }
 
+  .results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 4px 20px;
+    align-items: start;
+  }
   .result-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    padding: 8px 6px;
+    gap: 6px;
+    padding: 5px 4px;
     border-bottom: 1px solid var(--border);
   }
   .result-row .matchup {
     flex: 1;
     min-width: 0;
-    font-size: 0.86rem;
+    font-size: 0.78rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -300,17 +306,17 @@
     flex-shrink: 0;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
   }
-  .score-sep { color: var(--muted); font-weight: 700; }
-  .score-box {
-    width: 34px;
-    padding: 6px 2px;
-    border-radius: 8px;
+  .score-sep { color: var(--muted); font-weight: 700; font-size: 0.8rem; }
+  .score-pair .score-box {
+    width: 24px;
+    padding: 3px 1px;
+    border-radius: 6px;
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--ink);
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     text-align: center;
     font-variant-numeric: tabular-nums;
   }
@@ -730,7 +736,7 @@
   }
 
   function renderResultsInput(rounds) {
-    let html = '';
+    let html = '<div class="results-grid">';
     rounds.forEach((round, ri) => {
       html += `<div class="round-block">`;
       html += `<span class="round-label">ROUND ${ri + 1}</span>`;
@@ -751,7 +757,8 @@
       });
       html += `</div>`;
     });
-    resultsContent.innerHTML = html || `<p class="empty-hint">입력할 경기가 없습니다.</p>`;
+    html += '</div>';
+    resultsContent.innerHTML = rounds.length ? html : `<p class="empty-hint">입력할 경기가 없습니다.</p>`;
   }
 
   resultsContent.addEventListener('input', (e) => {
