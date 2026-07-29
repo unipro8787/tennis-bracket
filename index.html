@@ -315,7 +315,6 @@
     </div>
     <div class="row-actions">
       <button class="btn btn-secondary" id="addPlayerBtn" type="button">+ 선수 추가</button>
-      <button class="btn btn-secondary" id="fillSampleBtn" type="button">예시 채우기</button>
       <button class="btn btn-secondary" id="clearBtn" type="button">전체 지우기</button>
     </div>
   </div>
@@ -339,11 +338,16 @@
 
   <div class="card" id="scheduleCard" style="display:none;">
     <h2><span class="step-num">03</span>대진표</h2>
+    <div class="row-actions no-capture" style="margin-bottom:14px;">
+      <button class="btn btn-secondary" id="reshuffleBtn" type="button">다르게 짜주기</button>
+      <button class="btn btn-secondary" id="saveImageBtn" type="button">이미지로 저장</button>
+    </div>
     <div id="scheduleContent"></div>
   </div>
 
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
   const playerListEl = document.getElementById('playerList');
   const scheduleCard = document.getElementById('scheduleCard');
@@ -440,33 +444,55 @@
 
   document.getElementById('addPlayerBtn').addEventListener('click', () => addPlayerRow());
 
-  document.getElementById('fillSampleBtn').addEventListener('click', () => {
-    playerListEl.innerHTML = '';
-    const sample = [
-      ['민준', 5], ['서연', 2], ['도윤', 4], ['하윤', 2],
-      ['시우', 3], ['지안', 3], ['예준', 4], ['수아', 1],
-      ['주원', 5], ['다은', 1]
-    ];
-    sample.forEach(([n, l]) => addPlayerRow(n, l));
-  });
-
   document.getElementById('clearBtn').addEventListener('click', () => {
     playerListEl.innerHTML = '';
     scheduleCard.style.display = 'none';
   });
 
-  document.getElementById('formScheduleBtn').addEventListener('click', () => {
+  function shuffle(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  function generateSchedule() {
     const players = getPlayers();
     if (players.length < 4) {
       alert('최소 4명 이상의 선수를 입력해주세요.');
-      return;
+      return false;
     }
     const courts = Math.max(1, parseInt(document.getElementById('courtsInput').value) || 1);
     const targetGames = parseInt(document.getElementById('gamesInput').value) || 4;
-    const { rounds, courtsUsed } = buildRotatingSchedule(players, courts, targetGames);
+    const { rounds, courtsUsed } = buildRotatingSchedule(shuffle(players), courts, targetGames);
     renderSchedule(rounds, players.length, courts, courtsUsed);
+    return true;
+  }
+
+  document.getElementById('formScheduleBtn').addEventListener('click', () => {
+    if (!generateSchedule()) return;
     scheduleCard.style.display = 'block';
     scheduleCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
+  document.getElementById('reshuffleBtn').addEventListener('click', () => {
+    generateSchedule();
+  });
+
+  document.getElementById('saveImageBtn').addEventListener('click', () => {
+    const cardStyle = getComputedStyle(scheduleCard);
+    html2canvas(scheduleCard, {
+      backgroundColor: cardStyle.backgroundColor,
+      ignoreElements: el => el.classList && el.classList.contains('no-capture')
+    }).then(canvas => {
+      const link = document.createElement('a');
+      const today = new Date().toISOString().slice(0, 10);
+      link.download = `대진표_${today}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    });
   });
 
   // every round, the players who've played the most (and rested the least) sit out,
