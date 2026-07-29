@@ -328,6 +328,11 @@
     margin: 10px 0 4px;
   }
   .slot-label:first-of-type { margin-top: 4px; }
+  .rest-note {
+    font-size: 0.8rem;
+    color: var(--clay-dark);
+    margin-bottom: 8px;
+  }
 
   .empty-hint {
     color: var(--muted);
@@ -375,6 +380,10 @@
       <div class="option-field">
         <label for="courtsInput">사용 가능 코트 수</label>
         <input type="number" id="courtsInput" min="1" value="2">
+      </div>
+      <div class="option-field">
+        <label for="gamesInput">인당 보장 경기 수</label>
+        <input type="number" id="gamesInput" min="1" placeholder="자동">
       </div>
     </div>
     <div class="row-actions" style="margin-top:18px;">
@@ -583,13 +592,25 @@
   document.getElementById('formScheduleBtn').addEventListener('click', () => {
     if (currentTeams.length < 2) return;
     const courts = Math.max(1, parseInt(document.getElementById('courtsInput').value) || 1);
-    const rounds = roundRobinSchedule(currentTeams);
+    const targetGames = parseInt(document.getElementById('gamesInput').value) || 0;
+    const rounds = buildSchedule(currentTeams, targetGames);
     renderSchedule(rounds, courts);
     scheduleCard.style.display = 'block';
     scheduleCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
 
-  function roundRobinSchedule(teams) {
+  // one full pass guarantees every team exactly (teams.length - 1) games;
+  // repeat the pass as many times as needed to cover the requested minimum.
+  function buildSchedule(teams, targetGames) {
+    const base = roundRobinBase(teams);
+    const gamesPerPass = teams.length - 1;
+    const passes = targetGames > gamesPerPass ? Math.ceil(targetGames / gamesPerPass) : 1;
+    const rounds = [];
+    for (let p = 0; p < passes; p++) rounds.push(...base);
+    return rounds;
+  }
+
+  function roundRobinBase(teams) {
     let list = teams.map((t, i) => ({ ...t, idx: i }));
     if (list.length % 2 !== 0) {
       list = [...list, { name: 'BYE', bye: true }];
@@ -602,14 +623,17 @@
     for (let r = 0; r < n - 1; r++) {
       const roundTeams = [fixed, ...rest];
       const matches = [];
+      let resting = null;
       for (let i = 0; i < n / 2; i++) {
         const home = roundTeams[i];
         const away = roundTeams[n - 1 - i];
         if (!home.bye && !away.bye) {
           matches.push([home, away]);
+        } else {
+          resting = home.bye ? away : home;
         }
       }
-      rounds.push(matches);
+      rounds.push({ matches, resting });
       rest.unshift(rest.pop());
     }
     return rounds;
@@ -617,9 +641,13 @@
 
   function renderSchedule(rounds, courts) {
     let html = '';
-    rounds.forEach((matches, ri) => {
+    rounds.forEach((round, ri) => {
+      const matches = round.matches;
       html += `<div class="round-block">`;
       html += `<span class="round-label">ROUND ${ri + 1}</span>`;
+      if (round.resting) {
+        html += `<div class="rest-note">휴식: ${escapeHtml(round.resting.name)}</div>`;
+      }
 
       if (matches.length === 0) {
         html += `<div class="table-scroll"><table class="match-table"><thead><tr><th>코트</th><th>대진</th></tr></thead><tbody>`;
