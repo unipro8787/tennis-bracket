@@ -339,7 +339,7 @@
   <div class="card" id="scheduleCard" style="display:none;">
     <h2><span class="step-num">03</span>대진표</h2>
     <div class="row-actions no-capture" style="margin-bottom:14px;">
-      <button class="btn btn-secondary" id="reshuffleBtn" type="button">다르게 짜주기</button>
+      <button class="btn btn-secondary" id="reshuffleBtn" type="button">재생성</button>
       <button class="btn btn-secondary" id="saveImageBtn" type="button">이미지로 저장</button>
     </div>
     <div id="scheduleContent"></div>
@@ -505,6 +505,8 @@
     const gamesPlayed = new Map(players.map(p => [p.name, 0]));
     const restsSoFar = new Map(players.map(p => [p.name, 0]));
     const partnerHistory = new Map(players.map(p => [p.name, new Set()]));
+    // 이름 표기 순서(포/백 자리)가 한쪽으로 쏠리지 않도록 포 자리 배정 횟수를 추적
+    const frontCount = new Map(players.map(p => [p.name, 0]));
 
     const rounds = [];
     let safety = 300;
@@ -519,18 +521,31 @@
       const playing = order.slice(restCount);
       resting.forEach(p => restsSoFar.set(p.name, restsSoFar.get(p.name) + 1));
 
-      const matches = formRoundMatches(playing, partnerHistory);
-      matches.forEach(([teamA, teamB]) => {
-        [...teamA, ...teamB].forEach(p => gamesPlayed.set(p.name, gamesPlayed.get(p.name) + 1));
-        partnerHistory.get(teamA[0].name).add(teamA[1].name);
-        partnerHistory.get(teamA[1].name).add(teamA[0].name);
-        partnerHistory.get(teamB[0].name).add(teamB[1].name);
-        partnerHistory.get(teamB[1].name).add(teamB[0].name);
+      const rawMatches = formRoundMatches(playing, partnerHistory);
+      const matches = rawMatches.map(([teamA, teamB]) => {
+        const orderedA = orderByFrontBack(teamA, frontCount);
+        const orderedB = orderByFrontBack(teamB, frontCount);
+        [...orderedA, ...orderedB].forEach(p => gamesPlayed.set(p.name, gamesPlayed.get(p.name) + 1));
+        partnerHistory.get(orderedA[0].name).add(orderedA[1].name);
+        partnerHistory.get(orderedA[1].name).add(orderedA[0].name);
+        partnerHistory.get(orderedB[0].name).add(orderedB[1].name);
+        partnerHistory.get(orderedB[1].name).add(orderedB[0].name);
+        return [orderedA, orderedB];
       });
 
       rounds.push({ matches, resting });
     }
     return { rounds, courtsUsed };
+  }
+
+  // decides which of the pair goes first (포) vs second (백): whoever has been
+  // placed in the 포 spot less often so far gets it this time.
+  function orderByFrontBack(pair, frontCount) {
+    const [x, y] = pair;
+    const front = frontCount.get(x.name) <= frontCount.get(y.name) ? x : y;
+    const back = front === x ? y : x;
+    frontCount.set(front.name, frontCount.get(front.name) + 1);
+    return [front, back];
   }
 
   // pairs players for one round only (snake by level), preferring partners not used before
