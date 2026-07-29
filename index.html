@@ -563,7 +563,7 @@
         const file = new File([blob], filename, { type: 'image/png' });
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
           try {
-            await navigator.share({ files: [file], title: '대진표' });
+            await navigator.share({ files: [file] });
             return;
           } catch (err) {
             if (err && err.name === 'AbortError') return;
