@@ -236,54 +236,7 @@
   }
   .option-field input[type="number"]:focus-visible { outline: 2px solid var(--court-green); outline-offset: -1px; }
 
-  .teams-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-    gap: 12px;
-    animation: rise 0.25s ease both;
-  }
   @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-  .team-card {
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px 16px;
-    background: var(--bg);
-  }
-  .team-card .team-name {
-    font-weight: 800;
-    font-size: 0.74rem;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-    margin-bottom: 8px;
-  }
-  .team-card .members { font-size: 1rem; font-weight: 600; margin-bottom: 6px; }
-  .team-card .sum {
-    font-size: 0.8rem;
-    color: var(--muted);
-    margin-bottom: 8px;
-  }
-  .team-balance-bar {
-    height: 5px;
-    border-radius: 999px;
-    background: var(--border);
-    overflow: hidden;
-  }
-  .team-balance-bar .fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--court-green), var(--clay));
-    border-radius: 999px;
-  }
-  .bye-note {
-    font-size: 0.85rem;
-    color: var(--clay-dark);
-    margin-top: 12px;
-  }
-  .balance-note {
-    font-size: 0.85rem;
-    color: var(--muted);
-    margin-top: 14px;
-  }
-
   .round-block { margin-bottom: 18px; animation: rise 0.25s ease both; }
   .round-block:last-child { margin-bottom: 0; }
   .table-scroll { overflow-x: auto; }
@@ -321,13 +274,6 @@
     border-radius: 999px;
     margin-bottom: 8px;
   }
-  .slot-label {
-    font-size: 0.78rem;
-    font-weight: 700;
-    color: var(--muted);
-    margin: 10px 0 4px;
-  }
-  .slot-label:first-of-type { margin-top: 4px; }
   .rest-note {
     font-size: 0.8rem;
     color: var(--clay-dark);
@@ -356,7 +302,7 @@
     </div>
     <h1>테니스 복식조 편성기</h1>
   </header>
-  <p class="sub">선수 이름과 실력 레벨을 입력하면, 실력이 균형 잡히도록 복식조를 자동으로 편성하고 대진표를 만들어 드립니다.</p>
+  <p class="sub">선수 이름과 실력 레벨을 입력하면, 매 라운드 파트너를 바꿔가며 실력이 균형 잡힌 대진표를 만들어 드립니다.</p>
 
   <div class="card">
     <h2><span class="step-num">01</span>선수 명단</h2>
@@ -387,20 +333,12 @@
       </div>
     </div>
     <div class="row-actions" style="margin-top:18px;">
-      <button class="btn btn-primary" id="formTeamsBtn" type="button">복식조 편성하기</button>
-      <button class="btn btn-accent" id="formScheduleBtn" type="button" disabled>대진표 생성하기</button>
+      <button class="btn btn-accent" id="formScheduleBtn" type="button">대진표 생성하기</button>
     </div>
   </div>
 
-  <div class="card" id="teamsCard" style="display:none;">
-    <h2><span class="step-num">03</span>편성 결과</h2>
-    <div class="teams-grid" id="teamsGrid"></div>
-    <div class="balance-note" id="balanceNote"></div>
-    <div class="bye-note" id="byeNote"></div>
-  </div>
-
   <div class="card" id="scheduleCard" style="display:none;">
-    <h2><span class="step-num">04</span>대진표 (라운드로빈)</h2>
+    <h2><span class="step-num">03</span>대진표</h2>
     <div id="scheduleContent"></div>
   </div>
 
@@ -408,15 +346,10 @@
 
 <script>
   const playerListEl = document.getElementById('playerList');
-  const teamsCard = document.getElementById('teamsCard');
-  const teamsGrid = document.getElementById('teamsGrid');
-  const balanceNote = document.getElementById('balanceNote');
-  const byeNote = document.getElementById('byeNote');
   const scheduleCard = document.getElementById('scheduleCard');
   const scheduleContent = document.getElementById('scheduleContent');
   const formScheduleBtn = document.getElementById('formScheduleBtn');
 
-  let currentTeams = [];
   let rowCounter = 0;
 
   function buildLevelPicker(initialLevel) {
@@ -519,159 +452,106 @@
 
   document.getElementById('clearBtn').addEventListener('click', () => {
     playerListEl.innerHTML = '';
-    teamsCard.style.display = 'none';
     scheduleCard.style.display = 'none';
-    formScheduleBtn.disabled = true;
   });
-
-  document.getElementById('formTeamsBtn').addEventListener('click', () => {
-    const players = getPlayers();
-    if (players.length < 2) {
-      alert('최소 2명 이상의 선수를 입력해주세요.');
-      return;
-    }
-
-    const sorted = [...players].sort((a, b) => b.level - a.level);
-
-    let bye = null;
-    let pool = sorted;
-    if (pool.length % 2 !== 0) {
-      bye = pool[Math.floor(pool.length / 2)];
-      pool = pool.filter(p => p !== bye);
-    }
-
-    const n = pool.length;
-    const teams = [];
-    for (let i = 0; i < n / 2; i++) {
-      const a = pool[i];
-      const b = pool[n - 1 - i];
-      teams.push({
-        name: `${a.name} · ${b.name}`,
-        members: [a, b],
-        sum: a.level + b.level
-      });
-    }
-
-    currentTeams = teams;
-    renderTeams(teams, bye);
-
-    teamsCard.style.display = 'block';
-    formScheduleBtn.disabled = teams.length < 2;
-    scheduleCard.style.display = 'none';
-    teamsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  });
-
-  function renderTeams(teams, bye) {
-    teamsGrid.innerHTML = '';
-    const maxSum = teams.length ? Math.max(...teams.map(t => t.sum)) : 1;
-    teams.forEach((t, i) => {
-      const div = document.createElement('div');
-      div.className = 'team-card';
-      const pct = Math.max(12, Math.round((t.sum / maxSum) * 100));
-      div.innerHTML = `
-        <div class="team-name">TEAM ${i + 1}</div>
-        <div class="members">${escapeHtml(t.members[0].name)} &amp; ${escapeHtml(t.members[1].name)}</div>
-        <div class="sum">레벨 합계: ${t.sum} (${t.members[0].level} + ${t.members[1].level})</div>
-        <div class="team-balance-bar"><div class="fill" style="width:${pct}%"></div></div>
-      `;
-      teamsGrid.appendChild(div);
-    });
-
-    if (teams.length > 0) {
-      const sums = teams.map(t => t.sum);
-      const max = Math.max(...sums);
-      const min = Math.min(...sums);
-      balanceNote.textContent = `팀 간 레벨 합계 차이: 최대 ${max} / 최소 ${min} (편차 ${max - min})`;
-    } else {
-      balanceNote.textContent = '';
-    }
-
-    byeNote.textContent = bye ? `※ 인원이 홀수라 ${bye.name}님은 이번 편성에서 제외(부전)되었습니다.` : '';
-  }
 
   document.getElementById('formScheduleBtn').addEventListener('click', () => {
-    if (currentTeams.length < 2) return;
+    const players = getPlayers();
+    if (players.length < 4) {
+      alert('최소 4명 이상의 선수를 입력해주세요.');
+      return;
+    }
     const courts = Math.max(1, parseInt(document.getElementById('courtsInput').value) || 1);
-    const targetGames = parseInt(document.getElementById('gamesInput').value) || 0;
-    const rounds = buildSchedule(currentTeams, targetGames);
-    renderSchedule(rounds, courts);
+    const targetGames = parseInt(document.getElementById('gamesInput').value) || 4;
+    const { rounds, courtsUsed } = buildRotatingSchedule(players, courts, targetGames);
+    renderSchedule(rounds, players.length, courts, courtsUsed);
     scheduleCard.style.display = 'block';
     scheduleCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
 
-  // one full pass guarantees every team exactly (teams.length - 1) games;
-  // repeat the pass as many times as needed to cover the requested minimum.
-  function buildSchedule(teams, targetGames) {
-    const base = roundRobinBase(teams);
-    const gamesPerPass = teams.length - 1;
-    const passes = targetGames > gamesPerPass ? Math.ceil(targetGames / gamesPerPass) : 1;
-    const rounds = [];
-    for (let p = 0; p < passes; p++) rounds.push(...base);
-    return rounds;
-  }
+  // every round, the players who've played the most (and rested the least) sit out,
+  // and everyone still on court gets a fresh partner each time.
+  function buildRotatingSchedule(players, courts, targetGames) {
+    const courtsUsed = Math.min(courts, Math.floor(players.length / 4));
+    if (courtsUsed < 1) return { rounds: [], courtsUsed: 0 };
 
-  function roundRobinBase(teams) {
-    let list = teams.map((t, i) => ({ ...t, idx: i }));
-    if (list.length % 2 !== 0) {
-      list = [...list, { name: 'BYE', bye: true }];
-    }
-    const n = list.length;
-    const rounds = [];
-    const fixed = list[0];
-    let rest = list.slice(1);
+    const perRound = courtsUsed * 4;
+    const gamesPlayed = new Map(players.map(p => [p.name, 0]));
+    const restsSoFar = new Map(players.map(p => [p.name, 0]));
+    const partnerHistory = new Map(players.map(p => [p.name, new Set()]));
 
-    for (let r = 0; r < n - 1; r++) {
-      const roundTeams = [fixed, ...rest];
-      const matches = [];
-      let resting = null;
-      for (let i = 0; i < n / 2; i++) {
-        const home = roundTeams[i];
-        const away = roundTeams[n - 1 - i];
-        if (!home.bye && !away.bye) {
-          matches.push([home, away]);
-        } else {
-          resting = home.bye ? away : home;
-        }
-      }
+    const rounds = [];
+    let safety = 300;
+    while (players.some(p => gamesPlayed.get(p.name) < targetGames) && safety-- > 0) {
+      const order = [...players].sort((a, b) => {
+        const byGames = gamesPlayed.get(b.name) - gamesPlayed.get(a.name);
+        if (byGames !== 0) return byGames;
+        return restsSoFar.get(a.name) - restsSoFar.get(b.name);
+      });
+      const restCount = players.length - perRound;
+      const resting = order.slice(0, restCount);
+      const playing = order.slice(restCount);
+      resting.forEach(p => restsSoFar.set(p.name, restsSoFar.get(p.name) + 1));
+
+      const matches = formRoundMatches(playing, partnerHistory);
+      matches.forEach(([teamA, teamB]) => {
+        [...teamA, ...teamB].forEach(p => gamesPlayed.set(p.name, gamesPlayed.get(p.name) + 1));
+        partnerHistory.get(teamA[0].name).add(teamA[1].name);
+        partnerHistory.get(teamA[1].name).add(teamA[0].name);
+        partnerHistory.get(teamB[0].name).add(teamB[1].name);
+        partnerHistory.get(teamB[1].name).add(teamB[0].name);
+      });
+
       rounds.push({ matches, resting });
-      rest.unshift(rest.pop());
     }
-    return rounds;
+    return { rounds, courtsUsed };
   }
 
-  function renderSchedule(rounds, courts) {
+  // pairs players for one round only (snake by level), preferring partners not used before
+  function formRoundMatches(playing, partnerHistory) {
+    const pool = [...playing].sort((a, b) => b.level - a.level);
+    const used = new Set();
+    const teams = [];
+
+    while (used.size < pool.length) {
+      const a = pool.find(p => !used.has(p.name));
+      used.add(a.name);
+      const remaining = pool.filter(p => !used.has(p.name)).sort((x, y) => x.level - y.level);
+      const partner = remaining.find(p => !partnerHistory.get(a.name).has(p.name)) || remaining[0];
+      used.add(partner.name);
+      teams.push([a, partner]);
+    }
+
+    const bySum = [...teams].sort((t1, t2) => (t2[0].level + t2[1].level) - (t1[0].level + t1[1].level));
+    const matches = [];
+    for (let i = 0; i < bySum.length / 2; i++) {
+      matches.push([bySum[i], bySum[bySum.length - 1 - i]]);
+    }
+    return matches;
+  }
+
+  function renderSchedule(rounds, totalPlayers, courts, courtsUsed) {
+    if (rounds.length === 0) {
+      scheduleContent.innerHTML = `<p class="empty-hint">코트 1개당 4명이 필요합니다. 인원(${totalPlayers}명)이나 코트 수를 확인해주세요.</p>`;
+      return;
+    }
     let html = '';
+    if (courtsUsed < courts) {
+      html += `<p class="empty-hint">인원이 부족해 코트 ${courtsUsed}개만 사용합니다.</p>`;
+    }
     rounds.forEach((round, ri) => {
-      const matches = round.matches;
       html += `<div class="round-block">`;
       html += `<span class="round-label">ROUND ${ri + 1}</span>`;
-      if (round.resting) {
-        html += `<div class="rest-note">휴식: ${escapeHtml(round.resting.name)}</div>`;
+      if (round.resting.length > 0) {
+        html += `<div class="rest-note">휴식: ${round.resting.map(p => escapeHtml(p.name)).join(' · ')}</div>`;
       }
-
-      if (matches.length === 0) {
-        html += `<div class="table-scroll"><table class="match-table"><thead><tr><th>코트</th><th>대진</th></tr></thead><tbody>`;
-        html += `<tr><td colspan="2" class="empty-hint">이번 라운드는 경기가 없습니다.</td></tr>`;
-        html += `</tbody></table></div>`;
-      } else {
-        // matches that can't fit on the available courts at once wait for the next time slot
-        const slots = [];
-        for (let i = 0; i < matches.length; i += courts) {
-          slots.push(matches.slice(i, i + courts));
-        }
-        slots.forEach((slot, si) => {
-          if (slots.length > 1) {
-            html += `<div class="slot-label">${si + 1}타임</div>`;
-          }
-          html += `<div class="table-scroll"><table class="match-table"><thead><tr><th>코트</th><th>대진</th></tr></thead><tbody>`;
-          slot.forEach((m, mi) => {
-            html += `<tr><td><span class="court-chip">${mi + 1}</span></td><td>${escapeHtml(m[0].name)} <strong>vs</strong> ${escapeHtml(m[1].name)}</td></tr>`;
-          });
-          html += `</tbody></table></div>`;
-        });
-      }
-
-      html += `</div>`;
+      html += `<div class="table-scroll"><table class="match-table"><thead><tr><th>코트</th><th>대진</th></tr></thead><tbody>`;
+      round.matches.forEach((m, mi) => {
+        const teamA = `${escapeHtml(m[0][0].name)} · ${escapeHtml(m[0][1].name)}`;
+        const teamB = `${escapeHtml(m[1][0].name)} · ${escapeHtml(m[1][1].name)}`;
+        html += `<tr><td><span class="court-chip">${mi + 1}</span></td><td>${teamA} <strong>vs</strong> ${teamB}</td></tr>`;
+      });
+      html += `</tbody></table></div></div>`;
     });
     scheduleContent.innerHTML = html;
   }
