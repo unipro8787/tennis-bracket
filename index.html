@@ -321,6 +321,13 @@
     border-radius: 999px;
     margin-bottom: 8px;
   }
+  .slot-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--muted);
+    margin: 10px 0 4px;
+  }
+  .slot-label:first-of-type { margin-top: 4px; }
 
   .empty-hint {
     color: var(--muted);
@@ -613,15 +620,30 @@
     rounds.forEach((matches, ri) => {
       html += `<div class="round-block">`;
       html += `<span class="round-label">ROUND ${ri + 1}</span>`;
-      html += `<div class="table-scroll"><table class="match-table"><thead><tr><th>코트</th><th>대진</th></tr></thead><tbody>`;
-      matches.forEach((m, mi) => {
-        const court = (mi % courts) + 1;
-        html += `<tr><td><span class="court-chip">${court}</span></td><td>${escapeHtml(m[0].name)} <strong>vs</strong> ${escapeHtml(m[1].name)}</td></tr>`;
-      });
+
       if (matches.length === 0) {
+        html += `<div class="table-scroll"><table class="match-table"><thead><tr><th>코트</th><th>대진</th></tr></thead><tbody>`;
         html += `<tr><td colspan="2" class="empty-hint">이번 라운드는 경기가 없습니다.</td></tr>`;
+        html += `</tbody></table></div>`;
+      } else {
+        // matches that can't fit on the available courts at once wait for the next time slot
+        const slots = [];
+        for (let i = 0; i < matches.length; i += courts) {
+          slots.push(matches.slice(i, i + courts));
+        }
+        slots.forEach((slot, si) => {
+          if (slots.length > 1) {
+            html += `<div class="slot-label">${si + 1}타임</div>`;
+          }
+          html += `<div class="table-scroll"><table class="match-table"><thead><tr><th>코트</th><th>대진</th></tr></thead><tbody>`;
+          slot.forEach((m, mi) => {
+            html += `<tr><td><span class="court-chip">${mi + 1}</span></td><td>${escapeHtml(m[0].name)} <strong>vs</strong> ${escapeHtml(m[1].name)}</td></tr>`;
+          });
+          html += `</tbody></table></div>`;
+        });
       }
-      html += `</tbody></table></div></div>`;
+
+      html += `</div>`;
     });
     scheduleContent.innerHTML = html;
   }
