@@ -280,6 +280,46 @@
     margin-bottom: 8px;
   }
 
+  .result-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .result-row .matchup { font-size: 0.9rem; }
+  .result-row .winner-pick { display: flex; gap: 4px; }
+  .winner-btn {
+    padding: 6px 9px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    max-width: 140px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .winner-btn.active {
+    background: var(--court-green);
+    border-color: var(--court-green);
+    color: white;
+  }
+  .score-input {
+    width: 72px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 0.85rem;
+    text-align: center;
+  }
+
   .empty-hint {
     color: var(--muted);
     font-size: 0.9rem;
@@ -345,6 +385,14 @@
     <div id="scheduleContent"></div>
   </div>
 
+  <div class="card" id="resultsCard" style="display:none;">
+    <h2><span class="step-num">04</span>경기 결과 입력</h2>
+    <div id="resultsContent"></div>
+    <div class="row-actions" style="margin-top:14px;">
+      <button class="btn btn-secondary" id="saveResultsBtn" type="button">결과 텍스트로 저장</button>
+    </div>
+  </div>
+
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -353,8 +401,12 @@
   const scheduleCard = document.getElementById('scheduleCard');
   const scheduleContent = document.getElementById('scheduleContent');
   const formScheduleBtn = document.getElementById('formScheduleBtn');
+  const resultsCard = document.getElementById('resultsCard');
+  const resultsContent = document.getElementById('resultsContent');
 
   let rowCounter = 0;
+  let lastRounds = [];
+  let resultsState = {};
 
   function buildLevelPicker(initialLevel) {
     const picker = document.createElement('div');
@@ -447,6 +499,7 @@
   document.getElementById('clearBtn').addEventListener('click', () => {
     playerListEl.innerHTML = '';
     scheduleCard.style.display = 'none';
+    resultsCard.style.display = 'none';
   });
 
   function shuffle(arr) {
@@ -468,6 +521,11 @@
     const targetGames = parseInt(document.getElementById('gamesInput').value) || 4;
     const { rounds, courtsUsed } = buildRotatingSchedule(shuffle(players), courts, targetGames);
     renderSchedule(rounds, players.length, courts, courtsUsed);
+
+    lastRounds = rounds;
+    resultsState = {};
+    renderResultsInput(rounds);
+    resultsCard.style.display = 'block';
     return true;
   }
 
@@ -675,6 +733,81 @@
     });
     scheduleContent.innerHTML = html;
   }
+
+  function renderResultsInput(rounds) {
+    let html = '';
+    rounds.forEach((round, ri) => {
+      html += `<div class="round-block">`;
+      html += `<span class="round-label">ROUND ${ri + 1}</span>`;
+      round.matches.forEach((m, mi) => {
+        const teamA = `${m[0][0].name} · ${m[0][1].name}`;
+        const teamB = `${m[1][0].name} · ${m[1][1].name}`;
+        const key = `${ri}_${mi}`;
+        html += `
+          <div class="result-row">
+            <div class="matchup">${escapeHtml(teamA)} <strong>vs</strong> ${escapeHtml(teamB)}</div>
+            <div class="winner-pick">
+              <button type="button" class="winner-btn" data-key="${key}" data-side="A" title="${escapeHtml(teamA)}">${escapeHtml(teamA)}</button>
+              <button type="button" class="winner-btn" data-key="${key}" data-side="B" title="${escapeHtml(teamB)}">${escapeHtml(teamB)}</button>
+            </div>
+            <input type="text" class="score-input" data-key="${key}" placeholder="스코어">
+          </div>
+        `;
+      });
+      html += `</div>`;
+    });
+    resultsContent.innerHTML = html || `<p class="empty-hint">입력할 경기가 없습니다.</p>`;
+  }
+
+  resultsContent.addEventListener('click', (e) => {
+    const btn = e.target.closest('.winner-btn');
+    if (!btn) return;
+    const key = btn.dataset.key;
+    resultsState[key] = resultsState[key] || {};
+    resultsState[key].winner = btn.dataset.side;
+    resultsContent.querySelectorAll(`.winner-btn[data-key="${key}"]`).forEach(b => {
+      b.classList.toggle('active', b.dataset.side === btn.dataset.side);
+    });
+  });
+
+  resultsContent.addEventListener('input', (e) => {
+    const input = e.target.closest('.score-input');
+    if (!input) return;
+    const key = input.dataset.key;
+    resultsState[key] = resultsState[key] || {};
+    resultsState[key].score = input.value;
+  });
+
+  function buildResultsText() {
+    const today = new Date().toISOString().slice(0, 10);
+    const lines = [`테니스 대진표 결과 (${today})`, ''];
+    lastRounds.forEach((round, ri) => {
+      lines.push(`ROUND ${ri + 1}`);
+      if (round.resting.length > 0) {
+        lines.push(`휴식: ${round.resting.map(p => p.name).join(', ')}`);
+      }
+      round.matches.forEach((m, mi) => {
+        const teamA = `${m[0][0].name} · ${m[0][1].name}`;
+        const teamB = `${m[1][0].name} · ${m[1][1].name}`;
+        const r = resultsState[`${ri}_${mi}`] || {};
+        const winnerLabel = r.winner === 'A' ? teamA : r.winner === 'B' ? teamB : '미정';
+        const scoreLabel = r.score ? ` (${r.score})` : '';
+        lines.push(`[코트 ${mi + 1}] ${teamA} vs ${teamB} → 승: ${winnerLabel}${scoreLabel}`);
+      });
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+
+  document.getElementById('saveResultsBtn').addEventListener('click', () => {
+    const text = buildResultsText();
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const today = new Date().toISOString().slice(0, 10);
+    const link = document.createElement('a');
+    link.download = `대진표_결과_${today}.txt`;
+    link.href = URL.createObjectURL(blob);
+    link.click();
+  });
 
   // default roster
   const defaultPlayers = [
