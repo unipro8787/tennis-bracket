@@ -281,43 +281,38 @@
   }
 
   .result-row {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-    gap: 8px;
+    display: flex;
     align-items: center;
+    justify-content: space-between;
+    gap: 10px;
     padding: 8px 6px;
     border-bottom: 1px solid var(--border);
   }
-  .result-row .matchup { font-size: 0.9rem; }
-  .result-row .winner-pick { display: flex; gap: 4px; }
-  .winner-btn {
-    padding: 6px 9px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--muted);
-    font-size: 0.78rem;
-    font-weight: 600;
-    cursor: pointer;
-    max-width: 140px;
+  .result-row .matchup {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.86rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .winner-btn.active {
-    background: var(--court-green);
-    border-color: var(--court-green);
-    color: white;
+  .score-pair {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
-  .score-input {
-    width: 72px;
-    padding: 6px 8px;
+  .score-sep { color: var(--muted); font-weight: 700; }
+  .score-box {
+    width: 34px;
+    padding: 6px 2px;
     border-radius: 8px;
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--ink);
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     text-align: center;
+    font-variant-numeric: tabular-nums;
   }
 
   .empty-hint {
@@ -746,11 +741,11 @@
         html += `
           <div class="result-row">
             <div class="matchup">${escapeHtml(teamA)} <strong>vs</strong> ${escapeHtml(teamB)}</div>
-            <div class="winner-pick">
-              <button type="button" class="winner-btn" data-key="${key}" data-side="A" title="${escapeHtml(teamA)}">${escapeHtml(teamA)}</button>
-              <button type="button" class="winner-btn" data-key="${key}" data-side="B" title="${escapeHtml(teamB)}">${escapeHtml(teamB)}</button>
+            <div class="score-pair">
+              <input type="text" inputmode="numeric" maxlength="2" class="score-box" data-key="${key}" data-side="a">
+              <span class="score-sep">:</span>
+              <input type="text" inputmode="numeric" maxlength="2" class="score-box" data-key="${key}" data-side="b">
             </div>
-            <input type="text" class="score-input" data-key="${key}" placeholder="스코어">
           </div>
         `;
       });
@@ -759,23 +754,12 @@
     resultsContent.innerHTML = html || `<p class="empty-hint">입력할 경기가 없습니다.</p>`;
   }
 
-  resultsContent.addEventListener('click', (e) => {
-    const btn = e.target.closest('.winner-btn');
-    if (!btn) return;
-    const key = btn.dataset.key;
-    resultsState[key] = resultsState[key] || {};
-    resultsState[key].winner = btn.dataset.side;
-    resultsContent.querySelectorAll(`.winner-btn[data-key="${key}"]`).forEach(b => {
-      b.classList.toggle('active', b.dataset.side === btn.dataset.side);
-    });
-  });
-
   resultsContent.addEventListener('input', (e) => {
-    const input = e.target.closest('.score-input');
+    const input = e.target.closest('.score-box');
     if (!input) return;
     const key = input.dataset.key;
     resultsState[key] = resultsState[key] || {};
-    resultsState[key].score = input.value;
+    resultsState[key][input.dataset.side] = input.value.trim();
   });
 
   function buildResultsText() {
@@ -790,9 +774,15 @@
         const teamA = `${m[0][0].name} · ${m[0][1].name}`;
         const teamB = `${m[1][0].name} · ${m[1][1].name}`;
         const r = resultsState[`${ri}_${mi}`] || {};
-        const winnerLabel = r.winner === 'A' ? teamA : r.winner === 'B' ? teamB : '미정';
-        const scoreLabel = r.score ? ` (${r.score})` : '';
-        lines.push(`[코트 ${mi + 1}] ${teamA} vs ${teamB} → 승: ${winnerLabel}${scoreLabel}`);
+        const a = r.a, b = r.b;
+        let outcome = '미정';
+        if (a !== undefined && b !== undefined && a !== '' && b !== '') {
+          const scoreLabel = ` (${a}:${b})`;
+          if (Number(a) > Number(b)) outcome = `${teamA}${scoreLabel}`;
+          else if (Number(b) > Number(a)) outcome = `${teamB}${scoreLabel}`;
+          else outcome = `무승부${scoreLabel}`;
+        }
+        lines.push(`[코트 ${mi + 1}] ${teamA} vs ${teamB} → 승: ${outcome}`);
       });
       lines.push('');
     });
