@@ -481,17 +481,65 @@
     generateSchedule();
   });
 
-  document.getElementById('saveImageBtn').addEventListener('click', () => {
+  // lays every round out in a grid (instead of one long vertical strip) so the
+  // whole schedule reads as a single poster-like image at a glance.
+  function buildScheduleCaptureEl() {
+    const blocks = [...scheduleContent.querySelectorAll('.round-block')];
+    const cols = Math.max(1, Math.min(4, Math.ceil(Math.sqrt(blocks.length))));
+    const colWidth = 300;
+    const gap = 16;
+    const pad = 24;
+
+    const pageStyle = getComputedStyle(document.body);
     const cardStyle = getComputedStyle(scheduleCard);
-    html2canvas(scheduleCard, {
-      backgroundColor: cardStyle.backgroundColor,
-      ignoreElements: el => el.classList && el.classList.contains('no-capture')
-    }).then(canvas => {
-      const link = document.createElement('a');
+
+    const wrap = document.createElement('div');
+    wrap.style.position = 'fixed';
+    wrap.style.top = '0';
+    wrap.style.left = '-99999px';
+    wrap.style.width = `${cols * colWidth + (cols - 1) * gap + pad * 2}px`;
+    wrap.style.padding = `${pad}px`;
+    wrap.style.background = cardStyle.backgroundColor;
+    wrap.style.color = pageStyle.color;
+    wrap.style.fontFamily = pageStyle.fontFamily;
+
+    const title = document.createElement('div');
+    title.textContent = '대진표';
+    title.style.cssText = 'font-size:22px;font-weight:800;margin-bottom:16px;';
+    wrap.appendChild(title);
+
+    const grid = document.createElement('div');
+    grid.style.cssText = `display:grid;grid-template-columns:repeat(${cols}, 1fr);gap:${gap}px;align-items:start;`;
+    blocks.forEach(block => grid.appendChild(block.cloneNode(true)));
+    wrap.appendChild(grid);
+
+    document.body.appendChild(wrap);
+    return wrap;
+  }
+
+  document.getElementById('saveImageBtn').addEventListener('click', () => {
+    const captureEl = buildScheduleCaptureEl();
+    const bg = getComputedStyle(scheduleCard).backgroundColor;
+    html2canvas(captureEl, { backgroundColor: bg }).then(async canvas => {
+      document.body.removeChild(captureEl);
       const today = new Date().toISOString().slice(0, 10);
-      link.download = `대진표_${today}.png`;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
+      const filename = `대진표_${today}.png`;
+
+      canvas.toBlob(async blob => {
+        const file = new File([blob], filename, { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({ files: [file], title: '대진표' });
+            return;
+          } catch (err) {
+            if (err && err.name === 'AbortError') return;
+          }
+        }
+        const link = document.createElement('a');
+        link.download = filename;
+        link.href = URL.createObjectURL(blob);
+        link.click();
+      }, 'image/png');
     });
   });
 
