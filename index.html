@@ -278,7 +278,37 @@
     font-size: 0.8rem;
     color: var(--clay-dark);
     margin-bottom: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
   }
+  .edit-hint {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .player-chip {
+    display: inline-block;
+    cursor: pointer;
+    border-radius: 6px;
+    padding: 1px 4px;
+    margin: -1px -4px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .player-chip:hover { background: var(--court-green-soft); }
+  .player-chip.selected { background: var(--court-green); color: #fff; }
+  .player-chip.drag-over { outline: 2px dashed var(--clay); outline-offset: 1px; }
+  .delete-match-btn {
+    border: none;
+    background: transparent;
+    color: var(--clay);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 4px 8px;
+    border-radius: 6px;
+  }
+  .delete-match-btn:hover { background: var(--clay); color: #fff; }
 
   .results-grid {
     display: grid;
@@ -408,6 +438,9 @@
   let rowCounter = 0;
   let lastRounds = [];
   let resultsState = {};
+  let lastTotalPlayers = 0;
+  let lastCourts = 1;
+  let lastCourtsUsed = 0;
 
   function buildLevelPicker(initialLevel) {
     const picker = document.createElement('div');
@@ -524,6 +557,9 @@
     renderSchedule(rounds, players.length, courts, courtsUsed);
 
     lastRounds = rounds;
+    lastTotalPlayers = players.length;
+    lastCourts = courts;
+    lastCourtsUsed = courtsUsed;
     resultsState = {};
     renderResultsInput(rounds);
     resultsCard.style.display = 'block';
@@ -575,6 +611,8 @@
       // freeze it so html2canvas doesn't capture a mid-fade (near-invisible) frame
       clone.style.animation = 'none';
       clone.style.opacity = '1';
+      // strip edit-only controls (delete buttons etc.) so they don't show up in the saved image
+      clone.querySelectorAll('.no-capture').forEach(el => el.remove());
       grid.appendChild(clone);
     });
     wrap.appendChild(grid);
@@ -709,6 +747,11 @@
     return matches;
   }
 
+  // chip = data-loc="ri,mi,team,slot" for a playing slot, or data-loc="ri,rest,idx" for a resting player
+  function chipHtml(name, loc) {
+    return `<span class="player-chip" draggable="true" data-loc="${loc}">${escapeHtml(name)}</span>`;
+  }
+
   function renderSchedule(rounds, totalPlayers, courts, courtsUsed) {
     if (rounds.length === 0) {
       scheduleContent.innerHTML = `<p class="empty-hint">코트 1개당 4명이 필요합니다. 인원(${totalPlayers}명)이나 코트 수를 확인해주세요.</p>`;
@@ -718,22 +761,124 @@
     if (courtsUsed < courts) {
       html += `<p class="empty-hint">인원이 부족해 코트 ${courtsUsed}개만 사용합니다.</p>`;
     }
+    html += `<p class="edit-hint">선수를 드래그하거나(PC) 두 번 탭해서(모바일) 자리를 맞바꿀 수 있어요. 게임을 지우려면 휴지통 아이콘을 누르세요.</p>`;
     rounds.forEach((round, ri) => {
       html += `<div class="round-block">`;
       html += `<span class="round-label">ROUND ${ri + 1}</span>`;
       if (round.resting.length > 0) {
-        html += `<div class="rest-note">휴식: ${round.resting.map(p => escapeHtml(p.name)).join(' · ')}</div>`;
+        const restChips = round.resting.map((p, idx) => chipHtml(p.name, `${ri},rest,${idx}`)).join(' · ');
+        html += `<div class="rest-note">휴식: ${restChips}</div>`;
       }
-      html += `<div class="table-scroll"><table class="match-table"><thead><tr><th>코트</th><th>대진</th></tr></thead><tbody>`;
+      html += `<div class="table-scroll"><table class="match-table"><thead><tr><th>코트</th><th>대진</th><th class="no-capture"></th></tr></thead><tbody>`;
       round.matches.forEach((m, mi) => {
-        const teamA = `${escapeHtml(m[0][0].name)} · ${escapeHtml(m[0][1].name)}`;
-        const teamB = `${escapeHtml(m[1][0].name)} · ${escapeHtml(m[1][1].name)}`;
-        html += `<tr><td><span class="court-chip">${mi + 1}</span></td><td>${teamA} <strong>vs</strong> ${teamB}</td></tr>`;
+        const teamA = `${chipHtml(m[0][0].name, `${ri},${mi},0,0`)} · ${chipHtml(m[0][1].name, `${ri},${mi},0,1`)}`;
+        const teamB = `${chipHtml(m[1][0].name, `${ri},${mi},1,0`)} · ${chipHtml(m[1][1].name, `${ri},${mi},1,1`)}`;
+        html += `<tr><td><span class="court-chip">${mi + 1}</span></td><td>${teamA} <strong>vs</strong> ${teamB}</td>` +
+          `<td class="no-capture"><button type="button" class="delete-match-btn" data-del-ri="${ri}" data-del-mi="${mi}" title="이 게임 삭제">🗑</button></td></tr>`;
       });
       html += `</tbody></table></div></div>`;
     });
     scheduleContent.innerHTML = html;
   }
+
+  function getPlayerAtLoc(loc) {
+    const [ri, a, b, c] = loc.split(',');
+    if (a === 'rest') return lastRounds[ri].resting[b];
+    return lastRounds[ri].matches[a][b][c];
+  }
+
+  function setPlayerAtLoc(loc, player) {
+    const [ri, a, b, c] = loc.split(',');
+    if (a === 'rest') {
+      lastRounds[ri].resting[b] = player;
+    } else {
+      lastRounds[ri].matches[a][b][c] = player;
+    }
+  }
+
+  function swapChips(locA, locB) {
+    if (locA === locB) return;
+    // limit swaps to within the same round — the schedule's round structure
+    // (courts/resting counts) is fixed per round, so cross-round swaps don't apply.
+    if (locA.split(',')[0] !== locB.split(',')[0]) return;
+    const playerA = getPlayerAtLoc(locA);
+    const playerB = getPlayerAtLoc(locB);
+    setPlayerAtLoc(locA, playerB);
+    setPlayerAtLoc(locB, playerA);
+    rerenderSchedule();
+  }
+
+  function deleteMatch(ri, mi) {
+    if (!confirm('이 게임을 삭제할까요?')) return;
+    lastRounds[ri].matches.splice(mi, 1);
+    const shifted = {};
+    Object.entries(resultsState).forEach(([key, val]) => {
+      const [kri, kmi] = key.split('_').map(Number);
+      if (kri !== ri) { shifted[key] = val; return; }
+      if (kmi === mi) return;
+      shifted[`${kri}_${kmi > mi ? kmi - 1 : kmi}`] = val;
+    });
+    resultsState = shifted;
+    rerenderSchedule();
+  }
+
+  function rerenderSchedule() {
+    renderSchedule(lastRounds, lastTotalPlayers, lastCourts, lastCourtsUsed);
+    renderResultsInput(lastRounds);
+  }
+
+  let selectedLoc = null;
+
+  scheduleContent.addEventListener('click', (e) => {
+    const delBtn = e.target.closest('.delete-match-btn');
+    if (delBtn) {
+      deleteMatch(delBtn.dataset.delRi, parseInt(delBtn.dataset.delMi, 10));
+      return;
+    }
+    const chip = e.target.closest('.player-chip');
+    if (!chip) return;
+    const loc = chip.dataset.loc;
+    if (selectedLoc === null) {
+      selectedLoc = loc;
+      chip.classList.add('selected');
+      return;
+    }
+    if (selectedLoc === loc) {
+      chip.classList.remove('selected');
+      selectedLoc = null;
+      return;
+    }
+    swapChips(selectedLoc, loc);
+    selectedLoc = null;
+  });
+
+  scheduleContent.addEventListener('dragstart', (e) => {
+    const chip = e.target.closest('.player-chip');
+    if (!chip) return;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', chip.dataset.loc);
+  });
+
+  scheduleContent.addEventListener('dragover', (e) => {
+    const chip = e.target.closest('.player-chip');
+    if (!chip) return;
+    e.preventDefault();
+    chip.classList.add('drag-over');
+  });
+
+  scheduleContent.addEventListener('dragleave', (e) => {
+    const chip = e.target.closest('.player-chip');
+    if (chip) chip.classList.remove('drag-over');
+  });
+
+  scheduleContent.addEventListener('drop', (e) => {
+    const chip = e.target.closest('.player-chip');
+    if (!chip) return;
+    e.preventDefault();
+    chip.classList.remove('drag-over');
+    const fromLoc = e.dataTransfer.getData('text/plain');
+    if (fromLoc) swapChips(fromLoc, chip.dataset.loc);
+  });
 
   function renderResultsInput(rounds) {
     let html = '<div class="results-grid">';
