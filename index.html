@@ -441,12 +441,100 @@
   const resultsCard = document.getElementById('resultsCard');
   const resultsContent = document.getElementById('resultsContent');
 
+  const STORAGE_KEY = 'tennisBracketState_v1';
+
   let rowCounter = 0;
   let lastRounds = [];
   let resultsState = {};
   let lastTotalPlayers = 0;
   let lastCourts = 1;
   let lastCourtsUsed = 0;
+
+  // persists everything needed to fully restore the page (roster, schedule, scores)
+  // so the app survives a mobile browser reloading the tab after it's backgrounded a while.
+  function saveState() {
+    const players = [...playerListEl.querySelectorAll('.player-row')].map(row => ({
+      rowId: row.dataset.rowId,
+      name: row.querySelector('.name-input').value,
+      level: parseInt(row.querySelector('.level-picker').dataset.level, 10)
+    }));
+    const state = {
+      players,
+      courts: document.getElementById('courtsInput').value,
+      games: document.getElementById('gamesInput').value,
+      scheduleVisible: scheduleCard.style.display !== 'none',
+      resultsVisible: resultsCard.style.display !== 'none',
+      lastTotalPlayers,
+      lastCourts,
+      lastCourtsUsed,
+      rounds: lastRounds.map(r => ({
+        matches: r.matches.map(m => m.map(team => team.map(p => p.rowId))),
+        resting: r.resting.map(p => p.rowId)
+      })),
+      resultsState
+    };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (err) {
+      // private-mode / quota errors: state just won't persist
+    }
+  }
+
+  // rebuilds player rows and reconstructs schedule/result state from localStorage,
+  // preserving shared player-object identity (by rowId) across rounds.
+  function restoreState() {
+    let raw;
+    try {
+      raw = localStorage.getItem(STORAGE_KEY);
+    } catch (err) {
+      return false;
+    }
+    if (!raw) return false;
+    let state;
+    try {
+      state = JSON.parse(raw);
+    } catch (err) {
+      return false;
+    }
+    if (!state || !Array.isArray(state.players) || state.players.length === 0) return false;
+
+    state.players.forEach(p => addPlayerRow(p.name, p.level, p.rowId));
+
+    const playerByRowId = new Map();
+    playerListEl.querySelectorAll('.player-row').forEach(row => {
+      playerByRowId.set(row.dataset.rowId, {
+        name: row.querySelector('.name-input').value,
+        level: parseInt(row.querySelector('.level-picker').dataset.level, 10),
+        rowId: row.dataset.rowId
+      });
+    });
+
+    if (state.courts) document.getElementById('courtsInput').value = state.courts;
+    if (state.games) document.getElementById('gamesInput').value = state.games;
+
+    lastRounds = (state.rounds || []).map(r => ({
+      matches: r.matches.map(m => m.map(team => team.map(rowId => playerByRowId.get(String(rowId))))),
+      resting: r.resting.map(rowId => playerByRowId.get(String(rowId)))
+    })).filter(r => r.matches.every(m => m.every(team => team.every(Boolean))) && r.resting.every(Boolean));
+
+    lastTotalPlayers = state.lastTotalPlayers || 0;
+    lastCourts = state.lastCourts || 1;
+    lastCourtsUsed = state.lastCourtsUsed || 0;
+    resultsState = state.resultsState || {};
+
+    if (lastRounds.length > 0) {
+      if (state.scheduleVisible) {
+        renderSchedule(lastRounds, lastTotalPlayers, lastCourts, lastCourtsUsed);
+        scheduleCard.style.display = 'block';
+      }
+      if (state.resultsVisible) {
+        renderResultsInput(lastRounds);
+        resultsCard.style.display = 'block';
+      }
+    }
+
+    return true;
+  }
 
   function buildLevelPicker(initialLevel) {
     const picker = document.createElement('div');
@@ -476,11 +564,19 @@
     });
   }
 
-  function addPlayerRow(name = '', level = 3) {
-    rowCounter += 1;
+  function addPlayerRow(name = '', level = 3, forcedRowId = null) {
+    let id;
+    if (forcedRowId !== null && forcedRowId !== undefined) {
+      id = String(forcedRowId);
+      const n = parseInt(forcedRowId, 10);
+      if (!isNaN(n)) rowCounter = Math.max(rowCounter, n);
+    } else {
+      rowCounter += 1;
+      id = String(rowCounter);
+    }
     const row = document.createElement('div');
     row.className = 'player-row';
-    row.dataset.rowId = rowCounter;
+    row.dataset.rowId = id;
 
     const idx = document.createElement('div');
     idx.className = 'idx';
@@ -490,8 +586,10 @@
     nameInput.className = 'name-input';
     nameInput.placeholder = '이름';
     nameInput.value = name;
+    nameInput.addEventListener('input', () => saveState());
 
     const picker = buildLevelPicker(level);
+    picker.addEventListener('click', () => saveState());
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
@@ -501,6 +599,7 @@
     removeBtn.addEventListener('click', () => {
       row.remove();
       renumberRows();
+      saveState();
     });
 
     row.append(idx, nameInput, picker, removeBtn);
@@ -534,13 +633,24 @@
     return players;
   }
 
-  document.getElementById('addPlayerBtn').addEventListener('click', () => addPlayerRow());
+  document.getElementById('addPlayerBtn').addEventListener('click', () => {
+    addPlayerRow();
+    saveState();
+  });
 
   document.getElementById('clearBtn').addEventListener('click', () => {
     playerListEl.innerHTML = '';
     scheduleCard.style.display = 'none';
     resultsCard.style.display = 'none';
+    lastRounds = [];
+    resultsState = {};
+    lastTotalPlayers = 0;
+    lastCourtsUsed = 0;
+    saveState();
   });
+
+  document.getElementById('courtsInput').addEventListener('input', () => saveState());
+  document.getElementById('gamesInput').addEventListener('input', () => saveState());
 
   function shuffle(arr) {
     const a = [...arr];
@@ -569,17 +679,21 @@
     resultsState = {};
     renderResultsInput(rounds);
     resultsCard.style.display = 'block';
+    saveState();
     return true;
   }
 
   document.getElementById('formScheduleBtn').addEventListener('click', () => {
     if (!generateSchedule()) return;
     scheduleCard.style.display = 'block';
+    saveState();
     scheduleCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
 
   document.getElementById('reshuffleBtn').addEventListener('click', () => {
     generateSchedule();
+    scheduleCard.style.display = 'block';
+    saveState();
   });
 
   // lays every round out in a grid (instead of one long vertical strip) so the
@@ -812,6 +926,7 @@
     setPlayerAtLoc(locA, playerB);
     setPlayerAtLoc(locB, playerA);
     rerenderSchedule();
+    saveState();
   }
 
   function deleteMatch(ri, mi) {
@@ -826,6 +941,7 @@
     });
     resultsState = shifted;
     rerenderSchedule();
+    saveState();
   }
 
   function rerenderSchedule() {
@@ -847,6 +963,7 @@
       if (row) row.querySelector('.name-input').value = trimmed;
     }
     rerenderSchedule();
+    saveState();
   }
 
   let selectedLoc = null;
@@ -918,13 +1035,14 @@
         const teamA = `${m[0][0].name} · ${m[0][1].name}`;
         const teamB = `${m[1][0].name} · ${m[1][1].name}`;
         const key = `${ri}_${mi}`;
+        const savedScore = resultsState[key] || {};
         html += `
           <div class="result-row">
             <div class="matchup">${escapeHtml(teamA)} <strong>vs</strong> ${escapeHtml(teamB)}</div>
             <div class="score-pair">
-              <input type="text" inputmode="numeric" maxlength="2" class="score-box" data-key="${key}" data-side="a">
+              <input type="text" inputmode="numeric" maxlength="2" class="score-box" data-key="${key}" data-side="a" value="${escapeHtml(savedScore.a || '')}">
               <span class="score-sep">:</span>
-              <input type="text" inputmode="numeric" maxlength="2" class="score-box" data-key="${key}" data-side="b">
+              <input type="text" inputmode="numeric" maxlength="2" class="score-box" data-key="${key}" data-side="b" value="${escapeHtml(savedScore.b || '')}">
             </div>
           </div>
         `;
@@ -941,6 +1059,7 @@
     const key = input.dataset.key;
     resultsState[key] = resultsState[key] || {};
     resultsState[key][input.dataset.side] = input.value.trim();
+    saveState();
   });
 
   function buildResultsText() {
@@ -1031,14 +1150,17 @@
     openTextPreview(text);
   });
 
-  // default roster
-  const defaultPlayers = [
-    ['안유현', 3], ['우대원', 4], ['권수기', 3], ['남택원', 4],
-    ['김종해', 3], ['이병일', 3], ['류병기', 4], ['서승훈', 3],
-    ['신동휘', 4], ['이정훈', 3], ['이희영', 4], ['최영열', 2],
-    ['허영주', 2]
-  ];
-  defaultPlayers.forEach(([n, l]) => addPlayerRow(n, l));
+  // restore saved state (roster/schedule/scores) if present; otherwise seed the default roster
+  if (!restoreState()) {
+    const defaultPlayers = [
+      ['안유현', 3], ['우대원', 4], ['권수기', 3], ['남택원', 4],
+      ['김종해', 3], ['이병일', 3], ['류병기', 4], ['서승훈', 3],
+      ['신동휘', 4], ['이정훈', 3], ['이희영', 4], ['최영열', 2],
+      ['허영주', 2]
+    ];
+    defaultPlayers.forEach(([n, l]) => addPlayerRow(n, l));
+    saveState();
+  }
 </script>
 </body>
 </html>
