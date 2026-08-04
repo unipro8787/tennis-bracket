@@ -447,7 +447,7 @@
 
   // Cloudflare Worker endpoint that commits results to the GitHub repo.
   // Fill this in after deploying worker/results-committer.js — see worker/README.md.
-  const RESULTS_WORKER_URL = '';
+  const RESULTS_WORKER_URL = 'https://tennis-bracket-results.unipro8787.workers.dev';
 
   // Sends the results text to the Worker, which holds the GitHub token server-side
   // and commits it to results/<date>.txt — no token is ever present in this page.
