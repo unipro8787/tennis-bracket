@@ -425,8 +425,9 @@
   <div class="card" id="resultsCard" style="display:none;">
     <h2><span class="step-num">04</span>경기 결과 입력</h2>
     <div id="resultsContent"></div>
-    <div class="row-actions" style="margin-top:14px;">
+    <div class="row-actions" style="margin-top:14px; align-items:center;">
       <button class="btn btn-secondary" id="saveResultsBtn" type="button">결과 텍스트로 저장</button>
+      <span id="resultsSaveStatus" style="font-size:0.82rem; color:var(--muted);"></span>
     </div>
   </div>
 
@@ -442,6 +443,26 @@
   const resultsContent = document.getElementById('resultsContent');
 
   const STORAGE_KEY = 'tennisBracketState_v1';
+
+  // Cloudflare Worker endpoint that commits results to the GitHub repo.
+  // Fill this in after deploying worker/results-committer.js — see worker/README.md.
+  const RESULTS_WORKER_URL = '';
+
+  // Sends the results text to the Worker, which holds the GitHub token server-side
+  // and commits it to results/<date>.txt — no token is ever present in this page.
+  async function commitResultsToGit(text) {
+    if (!RESULTS_WORKER_URL) return { skipped: true };
+    try {
+      const resp = await fetch(RESULTS_WORKER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      return { ok: resp.ok };
+    } catch (err) {
+      return { ok: false };
+    }
+  }
 
   let rowCounter = 0;
   let lastRounds = [];
@@ -1134,6 +1155,17 @@
 
   document.getElementById('saveResultsBtn').addEventListener('click', async () => {
     const text = buildResultsText();
+    const statusEl = document.getElementById('resultsSaveStatus');
+
+    if (RESULTS_WORKER_URL) {
+      if (statusEl) statusEl.textContent = '깃에 저장 중…';
+      const result = await commitResultsToGit(text);
+      if (statusEl) {
+        statusEl.textContent = result.ok ? '깃에 저장됨 ✓' : '깃 저장 실패';
+        setTimeout(() => { statusEl.textContent = ''; }, 4000);
+      }
+    }
+
     const today = new Date().toISOString().slice(0, 10);
     const filename = `대진표_결과_${today}.txt`;
 
