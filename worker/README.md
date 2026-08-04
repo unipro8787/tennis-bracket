@@ -1,6 +1,6 @@
-# 결과 자동 커밋 Worker
+# 결과 자동 커밋 + 통계 Worker
 
-"결과 텍스트로 저장" 버튼을 누르면 결과를 `results/<날짜>.txt`로 GitHub 저장소에 자동 커밋해주는 Cloudflare Worker입니다. GitHub 토큰은 이 Worker의 비밀(secret)로만 저장되고, 공개 페이지(GitHub Pages) 쪽 코드에는 절대 노출되지 않습니다.
+"결과 텍스트로 저장" 버튼을 누르면 결과를 `results/<날짜>.txt`로 GitHub 저장소에 자동 커밋하고, `/stats` 경로에서는 지금까지 저장된 모든 결과 파일을 집계해 순위와 포(front)/백(back) 자리 승률을 보여주는 Cloudflare Worker입니다. GitHub 토큰은 이 Worker의 비밀(secret)로만 저장되고, 공개 페이지(GitHub Pages) 쪽 코드에는 절대 노출되지 않습니다.
 
 ## 배포 순서 (본인 Cloudflare 계정 필요)
 
@@ -33,7 +33,14 @@
 
 ## 동작 방식
 
+**저장 (`POST /`)**
 - 클라이언트는 결과 텍스트만 이 Worker에 POST로 전송합니다.
 - Worker는 `unipro8787.github.io` 출처(Origin)에서 온 요청만 허용합니다.
 - Worker가 GitHub Contents API로 `results/YYYY-MM-DD.txt` 파일을 생성하거나(이미 있으면) 갱신합니다.
 - 하루에 여러 번 저장을 눌러도 같은 날짜 파일이 최신 내용으로 덮어써집니다.
+
+**통계 (`GET /stats`)**
+- 브라우저에서 Worker 배포 URL 뒤에 `/stats`를 붙여 직접 접속하면 됩니다 (예: `https://tennis-bracket-results.<subdomain>.workers.dev/stats`).
+- Worker가 `results/` 폴더의 모든 `.txt` 파일을 읽어와 파싱한 뒤, 선수별 순위(경기/승/패/무/승률/휴식)와 포/백 자리별 승률 표를 HTML로 렌더링합니다.
+- 점수를 입력하지 않은 "미정" 경기는 통계에서 제외됩니다.
+- 포/백 자리 표본이 3경기 미만인 선수는 "표본 부족"으로 표시됩니다 (전체 집계에서는 포/백 승률이 항상 거의 동일하게 나오는 게 수학적으로 당연하므로, 의미 있는 건 선수 개인의 포·백 성향 차이입니다).

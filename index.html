@@ -427,6 +427,7 @@
     <div id="resultsContent"></div>
     <div class="row-actions" style="margin-top:14px; align-items:center;">
       <button class="btn btn-secondary" id="saveResultsBtn" type="button">결과 텍스트로 저장</button>
+      <button class="btn btn-secondary" id="viewStatsBtn" type="button" style="display:none;">통계 보기</button>
       <span id="resultsSaveStatus" style="font-size:0.82rem; color:var(--muted);"></span>
     </div>
   </div>
@@ -1181,6 +1182,14 @@
 
     openTextPreview(text);
   });
+
+  const viewStatsBtn = document.getElementById('viewStatsBtn');
+  if (RESULTS_WORKER_URL) {
+    viewStatsBtn.style.display = '';
+    viewStatsBtn.addEventListener('click', () => {
+      window.open(`${RESULTS_WORKER_URL}/stats`, '_blank');
+    });
+  }
 
   // restore saved state (roster/schedule/scores) if present; otherwise seed the default roster
   if (!restoreState()) {
