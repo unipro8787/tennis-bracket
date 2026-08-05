@@ -1154,9 +1154,25 @@
     document.body.appendChild(overlay);
   }
 
+  function hasIncompleteResults() {
+    return lastRounds.some((round, ri) => round.matches.some((m, mi) => {
+      const r = resultsState[`${ri}_${mi}`] || {};
+      return !r.a || !r.b;
+    }));
+  }
+
   document.getElementById('saveResultsBtn').addEventListener('click', async () => {
-    const text = buildResultsText();
     const statusEl = document.getElementById('resultsSaveStatus');
+
+    if (hasIncompleteResults()) {
+      if (statusEl) {
+        statusEl.textContent = '모든 경기의 점수를 입력해야 저장할 수 있어요';
+        setTimeout(() => { statusEl.textContent = ''; }, 4000);
+      }
+      return;
+    }
+
+    const text = buildResultsText();
 
     if (RESULTS_WORKER_URL) {
       if (statusEl) statusEl.textContent = '깃에 저장 중…';
