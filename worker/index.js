@@ -476,9 +476,6 @@ function renderStatsHtml(players, awards, markdown) {
   .medal-list .medal { font-size:1rem; width:1.4em; }
   .medal-list .stat { margin-left:auto; color:#5f6f66; font-size:0.82rem; }
 
-  details.md-box { background:#fff; border-radius:10px; padding:14px 16px; margin:8px 0 32px; box-shadow:0 1px 2px rgba(0,0,0,0.05); }
-  details.md-box summary { cursor:pointer; font-weight:600; font-size:0.9rem; color:#145c39; }
-  textarea#share-text { width:100%; box-sizing:border-box; min-height:320px; margin-top:12px; font-family:ui-monospace, "Consolas", monospace; font-size:0.82rem; line-height:1.5; padding:12px; border-radius:8px; border:1px solid #dde4da; }
 </style></head>
 <body>
   <h1>🎾 테니스 복식조 통계 · 어워드</h1>
@@ -491,10 +488,7 @@ function renderStatsHtml(players, awards, markdown) {
 
   ${renderAwardsCardsHtml(awards)}
 
-  <details class="md-box">
-    <summary>공유할 내용 보기 (단톡방/카페에 붙여넣기용)</summary>
-    <textarea id="share-text" readonly>${escapeHtml(markdown)}</textarea>
-  </details>
+  <textarea id="share-text" readonly style="position:absolute; left:-9999px;">${escapeHtml(markdown)}</textarea>
 
   ${renderRankingTablesHtml(players)}
 
@@ -502,10 +496,9 @@ function renderStatsHtml(players, awards, markdown) {
     function copyShareText() {
       const ta = document.getElementById('share-text');
       const status = document.getElementById('copy-status');
-      ta.style.display = 'block';
       ta.focus();
       ta.select();
-      const done = (ok) => { status.textContent = ok ? '복사됐어요! ✓' : '복사 실패 — 아래 내용을 직접 선택해 복사해주세요'; setTimeout(() => { status.textContent = ''; }, 3000); };
+      const done = (ok) => { status.textContent = ok ? '복사됐어요! ✓' : '복사 실패'; setTimeout(() => { status.textContent = ''; }, 3000); };
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(ta.value).then(() => done(true)).catch(() => {
           try { done(document.execCommand('copy')); } catch (e) { done(false); }
