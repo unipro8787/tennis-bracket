@@ -120,6 +120,12 @@
     padding: 2px 8px;
     flex-shrink: 0;
   }
+  .generated-at {
+    margin-left: auto;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--muted);
+  }
 
   #playerList { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
   .player-row {
@@ -414,7 +420,7 @@
   </div>
 
   <div class="card" id="scheduleCard" style="display:none;">
-    <h2><span class="step-num">03</span>대진표</h2>
+    <h2><span class="step-num">03</span>대진표<span id="scheduleGeneratedAt" class="generated-at"></span></h2>
     <div class="row-actions no-capture" style="margin-bottom:14px;">
       <button class="btn btn-secondary" id="reshuffleBtn" type="button">재생성</button>
       <button class="btn btn-secondary" id="saveImageBtn" type="button">이미지로 저장</button>
@@ -471,6 +477,17 @@
   let lastTotalPlayers = 0;
   let lastCourts = 1;
   let lastCourtsUsed = 0;
+  let lastGeneratedAt = null;
+
+  function formatGeneratedAt(date) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())} 생성`;
+  }
+
+  function renderGeneratedAt() {
+    const el = document.getElementById('scheduleGeneratedAt');
+    el.textContent = lastGeneratedAt ? formatGeneratedAt(lastGeneratedAt) : '';
+  }
 
   // persists everything needed to fully restore the page (roster, schedule, scores)
   // so the app survives a mobile browser reloading the tab after it's backgrounded a while.
@@ -489,6 +506,7 @@
       lastTotalPlayers,
       lastCourts,
       lastCourtsUsed,
+      lastGeneratedAt: lastGeneratedAt ? lastGeneratedAt.toISOString() : null,
       rounds: lastRounds.map(r => ({
         matches: r.matches.map(m => m.map(team => team.map(p => p.rowId))),
         resting: r.resting.map(p => p.rowId)
@@ -542,11 +560,13 @@
     lastTotalPlayers = state.lastTotalPlayers || 0;
     lastCourts = state.lastCourts || 1;
     lastCourtsUsed = state.lastCourtsUsed || 0;
+    lastGeneratedAt = state.lastGeneratedAt ? new Date(state.lastGeneratedAt) : null;
     resultsState = state.resultsState || {};
 
     if (lastRounds.length > 0) {
       if (state.scheduleVisible) {
         renderSchedule(lastRounds, lastTotalPlayers, lastCourts, lastCourtsUsed);
+        renderGeneratedAt();
         scheduleCard.style.display = 'block';
       }
       if (state.resultsVisible) {
@@ -668,6 +688,8 @@
     resultsState = {};
     lastTotalPlayers = 0;
     lastCourtsUsed = 0;
+    lastGeneratedAt = null;
+    renderGeneratedAt();
     saveState();
   });
 
@@ -698,6 +720,8 @@
     lastTotalPlayers = players.length;
     lastCourts = courts;
     lastCourtsUsed = courtsUsed;
+    lastGeneratedAt = new Date();
+    renderGeneratedAt();
     resultsState = {};
     renderResultsInput(rounds);
     resultsCard.style.display = 'block';
@@ -741,8 +765,17 @@
     wrap.style.fontFamily = pageStyle.fontFamily;
 
     const title = document.createElement('div');
-    title.textContent = '대진표';
-    title.style.cssText = 'font-size:22px;font-weight:800;margin-bottom:16px;';
+    title.style.cssText = 'display:flex;align-items:baseline;gap:10px;margin-bottom:16px;';
+    const titleText = document.createElement('span');
+    titleText.textContent = '대진표';
+    titleText.style.cssText = 'font-size:22px;font-weight:800;';
+    title.appendChild(titleText);
+    if (lastGeneratedAt) {
+      const titleDate = document.createElement('span');
+      titleDate.textContent = formatGeneratedAt(lastGeneratedAt);
+      titleDate.style.cssText = `font-size:13px;font-weight:500;color:${pageStyle.getPropertyValue('--muted') || pageStyle.color};`;
+      title.appendChild(titleDate);
+    }
     wrap.appendChild(title);
 
     const grid = document.createElement('div');
