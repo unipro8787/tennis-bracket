@@ -397,6 +397,7 @@
       <span class="lg-dot" style="background:var(--clay)"></span>상급
     </div>
     <div class="row-actions">
+      <button class="btn btn-secondary" id="resetPlayersBtn" type="button">초기화</button>
       <button class="btn btn-secondary" id="addPlayerBtn" type="button">+ 선수 추가</button>
       <button class="btn btn-secondary" id="clearBtn" type="button">전체 지우기</button>
     </div>
@@ -450,6 +451,13 @@
   const resultsContent = document.getElementById('resultsContent');
 
   const STORAGE_KEY = 'tennisBracketState_v1';
+
+  const DEFAULT_PLAYERS = [
+    ['안유현', 3], ['우대원', 4], ['권수기', 3], ['남택원', 4],
+    ['김종해', 3], ['이병일', 3], ['류병기', 4], ['서승훈', 3],
+    ['신동휘', 4], ['이정훈', 3], ['이희영', 4], ['최영열', 2],
+    ['허영주', 2]
+  ];
 
   // Cloudflare Worker endpoint that commits results to the GitHub repo.
   // Fill this in after deploying worker/results-committer.js — see worker/README.md.
@@ -690,6 +698,20 @@
     lastCourtsUsed = 0;
     lastGeneratedAt = null;
     renderGeneratedAt();
+    saveState();
+  });
+
+  document.getElementById('resetPlayersBtn').addEventListener('click', () => {
+    playerListEl.innerHTML = '';
+    scheduleCard.style.display = 'none';
+    resultsCard.style.display = 'none';
+    lastRounds = [];
+    resultsState = {};
+    lastTotalPlayers = 0;
+    lastCourtsUsed = 0;
+    lastGeneratedAt = null;
+    renderGeneratedAt();
+    DEFAULT_PLAYERS.forEach(([n, l]) => addPlayerRow(n, l));
     saveState();
   });
 
@@ -1242,13 +1264,7 @@
 
   // restore saved state (roster/schedule/scores) if present; otherwise seed the default roster
   if (!restoreState()) {
-    const defaultPlayers = [
-      ['안유현', 3], ['우대원', 4], ['권수기', 3], ['남택원', 4],
-      ['김종해', 3], ['이병일', 3], ['류병기', 4], ['서승훈', 3],
-      ['신동휘', 4], ['이정훈', 3], ['이희영', 4], ['최영열', 2],
-      ['허영주', 2]
-    ];
-    defaultPlayers.forEach(([n, l]) => addPlayerRow(n, l));
+    DEFAULT_PLAYERS.forEach(([n, l]) => addPlayerRow(n, l));
     saveState();
   }
 </script>
