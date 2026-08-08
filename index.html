@@ -497,15 +497,14 @@
     el.textContent = lastGeneratedAt ? formatGeneratedAt(lastGeneratedAt) : '';
   }
 
-  // persists everything needed to fully restore the page (roster, schedule, scores)
-  // so the app survives a mobile browser reloading the tab after it's backgrounded a while.
-  function saveState() {
+  // builds the full snapshot needed to restore the page (roster, schedule, scores)
+  function buildStateObject() {
     const players = [...playerListEl.querySelectorAll('.player-row')].map(row => ({
       rowId: row.dataset.rowId,
       name: row.querySelector('.name-input').value,
       level: parseInt(row.querySelector('.level-picker').dataset.level, 10)
     }));
-    const state = {
+    return {
       players,
       courts: document.getElementById('courtsInput').value,
       games: document.getElementById('gamesInput').value,
@@ -521,31 +520,62 @@
       })),
       resultsState
     };
+  }
+
+  // saves locally (instant, survives offline/backgrounded tabs) and pushes the
+  // same snapshot to the shared Worker/KV store so every browser — including
+  // separate storage sandboxes like the KakaoTalk in-app browser vs. Safari —
+  // ends up showing the same roster/schedule/scores.
+  function saveState() {
+    const state = buildStateObject();
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (err) {
-      // private-mode / quota errors: state just won't persist
+      // private-mode / quota errors: local copy just won't persist
+    }
+    scheduleServerSync(state);
+  }
+
+  let serverSyncTimer = null;
+  function scheduleServerSync(state) {
+    if (!RESULTS_WORKER_URL) return;
+    clearTimeout(serverSyncTimer);
+    // debounced so rapid edits (typing a name, clicking level dots) don't
+    // spam the Worker with a request per keystroke
+    serverSyncTimer = setTimeout(() => pushStateToServer(state), 600);
+  }
+
+  async function pushStateToServer(state) {
+    try {
+      await fetch(`${RESULTS_WORKER_URL}/state`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state),
+      });
+    } catch (err) {
+      // offline or blocked — the local copy above still covers this device
     }
   }
 
-  // rebuilds player rows and reconstructs schedule/result state from localStorage,
-  // preserving shared player-object identity (by rowId) across rounds.
-  function restoreState() {
-    let raw;
+  async function fetchServerState() {
+    if (!RESULTS_WORKER_URL) return null;
     try {
-      raw = localStorage.getItem(STORAGE_KEY);
+      const resp = await fetch(`${RESULTS_WORKER_URL}/state`);
+      if (!resp.ok) return null;
+      return await resp.json();
     } catch (err) {
-      return false;
+      return null;
     }
-    if (!raw) return false;
-    let state;
-    try {
-      state = JSON.parse(raw);
-    } catch (err) {
-      return false;
-    }
+  }
+
+  // rebuilds player rows and reconstructs schedule/result state from a saved
+  // snapshot (either the local copy or the shared server copy), preserving
+  // shared player-object identity (by rowId) across rounds.
+  function applyState(state) {
     if (!state || !Array.isArray(state.players) || state.players.length === 0) return false;
 
+    playerListEl.innerHTML = '';
+    rowCounter = 0;
     state.players.forEach(p => addPlayerRow(p.name, p.level, p.rowId));
 
     const playerByRowId = new Map();
@@ -570,20 +600,39 @@
     lastCourtsUsed = state.lastCourtsUsed || 0;
     lastGeneratedAt = state.lastGeneratedAt ? new Date(state.lastGeneratedAt) : null;
     resultsState = state.resultsState || {};
+    renderGeneratedAt();
 
-    if (lastRounds.length > 0) {
-      if (state.scheduleVisible) {
-        renderSchedule(lastRounds, lastTotalPlayers, lastCourts, lastCourtsUsed);
-        renderGeneratedAt();
-        scheduleCard.style.display = 'block';
-      }
-      if (state.resultsVisible) {
-        renderResultsInput(lastRounds);
-        resultsCard.style.display = 'block';
-      }
+    if (lastRounds.length > 0 && state.scheduleVisible) {
+      renderSchedule(lastRounds, lastTotalPlayers, lastCourts, lastCourtsUsed);
+      scheduleCard.style.display = 'block';
+    } else {
+      scheduleCard.style.display = 'none';
+    }
+    if (lastRounds.length > 0 && state.resultsVisible) {
+      renderResultsInput(lastRounds);
+      resultsCard.style.display = 'block';
+    } else {
+      resultsCard.style.display = 'none';
     }
 
     return true;
+  }
+
+  function restoreState() {
+    let raw;
+    try {
+      raw = localStorage.getItem(STORAGE_KEY);
+    } catch (err) {
+      return false;
+    }
+    if (!raw) return false;
+    let state;
+    try {
+      state = JSON.parse(raw);
+    } catch (err) {
+      return false;
+    }
+    return applyState(state);
   }
 
   function buildLevelPicker(initialLevel) {
@@ -1262,11 +1311,28 @@
     });
   }
 
-  // restore saved state (roster/schedule/scores) if present; otherwise seed the default roster
-  if (!restoreState()) {
-    DEFAULT_PLAYERS.forEach(([n, l]) => addPlayerRow(n, l));
-    saveState();
-  }
+  // restore saved state (roster/schedule/scores): paint instantly from the local
+  // copy (or the default roster) so the page isn't empty while we wait on the
+  // network, then reconcile with the shared server copy — the source of truth
+  // that keeps every browser/app (KakaoTalk in-app browser, Safari, ...) in sync.
+  (async function initApp() {
+    const hadLocal = restoreState();
+    if (!hadLocal) {
+      DEFAULT_PLAYERS.forEach(([n, l]) => addPlayerRow(n, l));
+    }
+
+    const serverState = await fetchServerState();
+    if (serverState) {
+      applyState(serverState);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(serverState));
+      } catch (err) {
+        // private-mode / quota errors: local copy just won't persist
+      }
+    } else {
+      saveState();
+    }
+  })();
 </script>
 </body>
 </html>

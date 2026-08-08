@@ -2,6 +2,10 @@
 //  - POST /        : commits the submitted results text to results/<date>.txt
 //  - GET  /stats    : reads every results/*.txt file and renders an awards
 //                      report (출석왕/승률왕/케미 등) plus the rankings table
+//  - GET  /state    : returns the shared roster/schedule state (from KV) so
+//                      every browser (KakaoTalk in-app, Safari, ...) sees the
+//                      same edits instead of each keeping its own localStorage
+//  - POST /state    : overwrites the shared state (last write wins)
 // The GitHub token stays in the Worker's secret store — it is never sent to
 // or readable from the public page.
 
@@ -89,6 +93,34 @@ async function handleSaveResults(request, env, origin) {
   if (!putResp.ok) {
     return new Response(`GitHub commit error: ${await putResp.text()}`, { status: 502, headers });
   }
+  return new Response('OK', { status: 200, headers });
+}
+
+// ---- shared state (roster/schedule/scores) sync across browsers/devices ----
+
+const STATE_KV_KEY = 'current';
+
+async function handleGetState(env, origin) {
+  const headers = { ...corsHeaders(origin), 'Content-Type': 'application/json; charset=utf-8' };
+  const raw = await env.STATE.get(STATE_KV_KEY);
+  return new Response(raw || 'null', { status: 200, headers });
+}
+
+async function handleSaveState(request, env, origin) {
+  const headers = corsHeaders(origin);
+  if (origin !== ALLOWED_ORIGIN) {
+    return new Response('Forbidden origin', { status: 403, headers });
+  }
+  const text = await request.text();
+  if (!text || text.length > 200000) {
+    return new Response('Invalid state', { status: 400, headers });
+  }
+  try {
+    JSON.parse(text);
+  } catch (e) {
+    return new Response('Invalid JSON', { status: 400, headers });
+  }
+  await env.STATE.put(STATE_KV_KEY, text);
   return new Response('OK', { status: 200, headers });
 }
 
@@ -559,7 +591,13 @@ export default {
     if (url.pathname === '/stats' && request.method === 'GET') {
       return handleStats(env);
     }
-    if (request.method === 'POST') {
+    if (url.pathname === '/state' && request.method === 'GET') {
+      return handleGetState(env, origin);
+    }
+    if (url.pathname === '/state' && request.method === 'POST') {
+      return handleSaveState(request, env, origin);
+    }
+    if (url.pathname === '/' && request.method === 'POST') {
       return handleSaveResults(request, env, origin);
     }
     return new Response('Not found', { status: 404 });
