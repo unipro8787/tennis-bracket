@@ -399,8 +399,10 @@
     <div class="row-actions">
       <button class="btn btn-secondary" id="resetPlayersBtn" type="button">초기화</button>
       <button class="btn btn-secondary" id="addPlayerBtn" type="button">+ 선수 추가</button>
+      <button class="btn btn-secondary" id="importImageBtn" type="button">이미지로 명단 등록</button>
       <button class="btn btn-secondary" id="clearBtn" type="button">전체 지우기</button>
     </div>
+    <input type="file" id="importImageInput" accept="image/*" hidden>
   </div>
 
   <div class="card">
@@ -515,8 +517,8 @@
       lastCourtsUsed,
       lastGeneratedAt: lastGeneratedAt ? lastGeneratedAt.toISOString() : null,
       rounds: lastRounds.map(r => ({
-        matches: r.matches.map(m => m.map(team => team.map(p => p.rowId))),
-        resting: r.resting.map(p => p.rowId)
+        matches: r.matches.map(m => m.map(team => team.map(p => ({ rowId: p.rowId, name: p.name })))),
+        resting: r.resting.map(p => ({ rowId: p.rowId, name: p.name }))
       })),
       resultsState
     };
@@ -590,9 +592,18 @@
     if (state.courts) document.getElementById('courtsInput').value = state.courts;
     if (state.games) document.getElementById('gamesInput').value = state.games;
 
+    // each slot entry is either a plain rowId (older saved state, before
+    // per-occurrence renames existed) or { rowId, name } carrying a name
+    // override that applies only to that one slot
+    const resolveSlot = entry => {
+      const isOverride = entry && typeof entry === 'object';
+      const base = playerByRowId.get(String(isOverride ? entry.rowId : entry));
+      if (!base) return null;
+      return isOverride && entry.name != null ? { ...base, name: entry.name } : base;
+    };
     lastRounds = (state.rounds || []).map(r => ({
-      matches: r.matches.map(m => m.map(team => team.map(rowId => playerByRowId.get(String(rowId))))),
-      resting: r.resting.map(rowId => playerByRowId.get(String(rowId)))
+      matches: r.matches.map(m => m.map(team => team.map(resolveSlot))),
+      resting: r.resting.map(resolveSlot)
     })).filter(r => r.matches.every(m => m.every(team => team.every(Boolean))) && r.resting.every(Boolean));
 
     lastTotalPlayers = state.lastTotalPlayers || 0;
@@ -764,6 +775,140 @@
     saveState();
   });
 
+  // OCR-based roster import: turns a photo of a name list (signup sheet, chat
+  // screenshot, etc.) into player rows. Tesseract.js is loaded lazily from a
+  // CDN only when this feature is actually used, since its wasm core is large.
+  let tesseractLoadPromise = null;
+  function loadTesseract() {
+    if (window.Tesseract) return Promise.resolve();
+    if (tesseractLoadPromise) return tesseractLoadPromise;
+    tesseractLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('OCR 라이브러리를 불러오지 못했습니다'));
+      document.head.appendChild(script);
+    });
+    return tesseractLoadPromise;
+  }
+
+  // OCR text is noisy (numbering, stray symbols, header words) so this keeps
+  // things conservative — the user reviews/edits the result before it's applied.
+  function parseNamesFromText(text) {
+    const NOISE_WORDS = new Set(['명단', '선수', '이름', '번호', '레벨', 'level', 'no', '참가', '참가자', '참석', '신청', '신청자']);
+    const tokens = [];
+    text.split(/\r?\n/).forEach(line => {
+      (line.includes(',') ? line.split(',') : [line]).forEach(part => tokens.push(part));
+    });
+
+    const names = [];
+    const seen = new Set();
+    tokens.forEach(raw => {
+      let tok = raw.trim();
+      if (!tok) return;
+      tok = tok.replace(/^[\s\-*•]*\d{1,3}[.)]\s*/, '').trim(); // leading "1." / "2)" numbering
+      tok = tok.replace(/^[-*•]\s*/, '').trim();
+      tok = tok.replace(/\s*[(（][^)）]*[)）]\s*$/, '').trim(); // trailing "(초급)" style annotation
+      tok = tok.replace(/\s+/g, ' ');
+      if (!tok) return;
+      // Tesseract's Korean OCR often reads a word as one space-separated Hangul
+      // syllable per token (e.g. "홍 길 동" instead of "홍길동") — collapse that
+      // back into a single word rather than leaving stray spaces in a name.
+      const hangulParts = tok.split(' ');
+      if (hangulParts.length > 1 && hangulParts.every(p => p.length === 1 && /[가-힣]/.test(p))) {
+        tok = hangulParts.join('');
+      }
+      if (/^[\d\s.\-_/()]+$/.test(tok)) return; // pure numbers/symbols
+      if (tok.length < 2 || tok.length > 12) return;
+      const words = tok.toLowerCase().split(' ');
+      if (words.every(w => NOISE_WORDS.has(w))) return; // header row like "번호 이름"
+      if (seen.has(tok)) return;
+      seen.add(tok);
+      names.push(tok);
+    });
+    return names;
+  }
+
+  // full-screen editable review so OCR mistakes get fixed before touching the roster.
+  function openNameReviewOverlay(names, onConfirm) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(10,14,10,0.92);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;';
+
+    const hint = document.createElement('div');
+    hint.textContent = '이미지에서 인식한 이름입니다. 잘못 인식된 부분은 직접 수정하세요 (한 줄에 한 명).';
+    hint.style.cssText = 'color:#fff;font-size:0.9rem;text-align:center;';
+
+    const textarea = document.createElement('textarea');
+    textarea.value = names.join('\n');
+    textarea.style.cssText = 'width:min(360px,90vw);max-height:50vh;min-height:180px;flex:1;border-radius:10px;border:none;padding:14px;font-size:0.95rem;line-height:1.6;background:#fff;color:#17241c;';
+
+    const replaceLabel = document.createElement('label');
+    replaceLabel.style.cssText = 'color:#fff;font-size:0.85rem;display:flex;align-items:center;gap:6px;';
+    const replaceCheckbox = document.createElement('input');
+    replaceCheckbox.type = 'checkbox';
+    replaceLabel.append(replaceCheckbox, document.createTextNode('기존 명단을 지우고 새로 등록'));
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:10px;';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = '명단에 등록';
+    confirmBtn.className = 'btn btn-accent';
+    confirmBtn.addEventListener('click', () => {
+      const finalNames = textarea.value.split('\n').map(s => s.trim()).filter(Boolean);
+      overlay.remove();
+      onConfirm(finalNames, replaceCheckbox.checked);
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = '취소';
+    cancelBtn.className = 'btn btn-secondary';
+    cancelBtn.style.cssText = 'background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.4);';
+    cancelBtn.addEventListener('click', () => overlay.remove());
+
+    btnRow.append(confirmBtn, cancelBtn);
+    overlay.append(hint, textarea, replaceLabel, btnRow);
+    document.body.appendChild(overlay);
+  }
+
+  const importImageBtn = document.getElementById('importImageBtn');
+  const importImageInput = document.getElementById('importImageInput');
+
+  importImageBtn.addEventListener('click', () => importImageInput.click());
+
+  importImageInput.addEventListener('change', async () => {
+    const file = importImageInput.files[0];
+    importImageInput.value = '';
+    if (!file) return;
+
+    const originalText = importImageBtn.textContent;
+    importImageBtn.disabled = true;
+    importImageBtn.textContent = '이미지 인식 중...';
+
+    try {
+      await loadTesseract();
+      const { data } = await Tesseract.recognize(file, 'kor+eng');
+      const names = parseNamesFromText(data.text);
+      if (names.length === 0) {
+        alert('이미지에서 이름을 인식하지 못했습니다. 더 선명한 사진으로 다시 시도해주세요.');
+        return;
+      }
+      openNameReviewOverlay(names, (finalNames, replace) => {
+        if (replace) playerListEl.innerHTML = '';
+        finalNames.forEach(n => addPlayerRow(n));
+        saveState();
+      });
+    } catch (err) {
+      console.error(err);
+      alert('이미지 인식에 실패했습니다: ' + err.message);
+    } finally {
+      importImageBtn.disabled = false;
+      importImageBtn.textContent = originalText;
+    }
+  });
+
   document.getElementById('courtsInput').addEventListener('input', () => saveState());
   document.getElementById('gamesInput').addEventListener('input', () => saveState());
 
@@ -887,6 +1032,7 @@
     closeBtn.type = 'button';
     closeBtn.textContent = '닫기';
     closeBtn.className = 'btn btn-secondary';
+    closeBtn.style.cssText = 'background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.4);';
     closeBtn.addEventListener('click', () => overlay.remove());
 
     overlay.append(hint, img, closeBtn);
@@ -1076,17 +1222,27 @@
   }
 
   // player objects are shared by reference across every round they appear in
-  // (see buildRotatingSchedule), so mutating .name here updates every occurrence at once.
+  // (see buildRotatingSchedule), so renaming must swap in a fresh object for
+  // just this slot rather than mutating .name on the shared object.
   function renamePlayer(loc) {
     const player = getPlayerAtLoc(loc);
     const newName = prompt('선수 이름 수정', player.name);
     if (newName === null) return;
     const trimmed = newName.trim();
     if (!trimmed || trimmed === player.name) return;
-    player.name = trimmed;
-    if (player.rowId) {
-      const row = playerListEl.querySelector(`.player-row[data-row-id="${player.rowId}"]`);
-      if (row) row.querySelector('.name-input').value = trimmed;
+
+    // if the typed name matches someone currently resting this round, treat it
+    // as a swap: that resting player takes the slot, and the player being
+    // replaced goes to rest instead of just becoming a text label.
+    const ri = loc.split(',')[0];
+    const resting = lastRounds[ri].resting;
+    const restIdx = resting.findIndex(p => p.name === trimmed);
+    if (restIdx !== -1) {
+      const restingPlayer = resting[restIdx];
+      resting[restIdx] = player;
+      setPlayerAtLoc(loc, restingPlayer);
+    } else {
+      setPlayerAtLoc(loc, { ...player, name: trimmed });
     }
     rerenderSchedule();
     saveState();
@@ -1251,6 +1407,7 @@
     closeBtn.type = 'button';
     closeBtn.textContent = '닫기';
     closeBtn.className = 'btn btn-secondary';
+    closeBtn.style.cssText = 'background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.4);';
     closeBtn.addEventListener('click', () => overlay.remove());
 
     btnRow.append(copyBtn, closeBtn);
