@@ -795,10 +795,29 @@
   // OCR text is noisy (numbering, stray symbols, header words) so this keeps
   // things conservative — the user reviews/edits the result before it's applied.
   function parseNamesFromText(text) {
-    const NOISE_WORDS = new Set(['명단', '선수', '이름', '번호', '레벨', 'level', 'no', '참가', '참가자', '참석', '신청', '신청자']);
+    const NOISE_WORDS = [
+      '명단', '선수', '이름', '번호', '레벨', 'level', 'no', '참가자', '참가', '참석',
+      '신청자', '신청서', '신청', '동호회', '클럽', '모임', '테니스', '접수', '날짜', '일시',
+    ];
+    // longest-first so greedy matching below prefers "신청자" over "신청" + stray "자"
+    const NOISE_BY_LENGTH = [...NOISE_WORDS].sort((a, b) => b.length - a.length);
+
+    // true if `str` can be fully explained as a run of header/label words with
+    // nothing left over — e.g. "참가신청명단" (= 참가+신청+명단), but not a real name.
+    function isPureNoisePhrase(str) {
+      if (!str) return false;
+      let i = 0;
+      while (i < str.length) {
+        const hit = NOISE_BY_LENGTH.find(w => str.toLowerCase().startsWith(w, i));
+        if (!hit) return false;
+        i += hit.length;
+      }
+      return true;
+    }
+
     const tokens = [];
     text.split(/\r?\n/).forEach(line => {
-      (line.includes(',') ? line.split(',') : [line]).forEach(part => tokens.push(part));
+      line.split(/[,，:：]/).forEach(part => tokens.push(part));
     });
 
     const names = [];
@@ -820,8 +839,7 @@
       }
       if (/^[\d\s.\-_/()]+$/.test(tok)) return; // pure numbers/symbols
       if (tok.length < 2 || tok.length > 12) return;
-      const words = tok.toLowerCase().split(' ');
-      if (words.every(w => NOISE_WORDS.has(w))) return; // header row like "번호 이름"
+      if (isPureNoisePhrase(tok.replace(/\s+/g, ''))) return; // header row, e.g. "참가신청명단" / "번호 이름"
       if (seen.has(tok)) return;
       seen.add(tok);
       names.push(tok);
