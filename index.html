@@ -306,7 +306,8 @@
   }
   .player-chip:hover { background: var(--court-green-soft); }
   .player-chip.selected { background: var(--court-green); color: #fff; }
-  .player-chip.drag-over { outline: 2px dashed var(--clay); outline-offset: 1px; }
+  .player-chip.dragging { background: var(--court-green); color: #fff; opacity: 0.6; outline: 2px solid var(--court-green); outline-offset: 1px; }
+  .player-chip.drag-over { background: var(--clay); color: #fff; outline: 2px dashed var(--clay); outline-offset: 1px; }
   .delete-match-btn {
     border: none;
     background: transparent;
@@ -364,6 +365,26 @@
     color: var(--muted);
     font-size: 0.9rem;
     padding: 8px 0;
+  }
+
+  #historyDateSelect {
+    padding: 9px 10px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 0.9rem;
+  }
+  #historyContent pre {
+    margin: 0;
+    padding: 14px;
+    border-radius: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-size: 0.82rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
   @media (max-width: 480px) {
@@ -439,6 +460,16 @@
       <button class="btn btn-secondary" id="viewStatsBtn" type="button" style="display:none;">통계 보기</button>
       <span id="resultsSaveStatus" style="font-size:0.82rem; color:var(--muted);"></span>
     </div>
+  </div>
+
+  <div class="card" id="historyCard" style="display:none;">
+    <h2><span class="step-num">05</span>지난 결과 불러오기</h2>
+    <div class="row-actions" style="align-items:center;">
+      <select id="historyDateSelect"></select>
+      <button class="btn btn-secondary" id="loadHistoryBtn" type="button">불러오기</button>
+      <span id="historyStatus" style="font-size:0.82rem; color:var(--muted);"></span>
+    </div>
+    <div id="historyContent" style="margin-top:14px;"></div>
   </div>
 
 </div>
@@ -798,6 +829,7 @@
     const NOISE_WORDS = [
       '명단', '선수', '이름', '번호', '레벨', 'level', 'no', '참가자', '참가', '참석',
       '신청자', '신청서', '신청', '동호회', '클럽', '모임', '테니스', '접수', '날짜', '일시',
+      '투표자', '이름순', '투표',
     ];
     // longest-first so greedy matching below prefers "신청자" over "신청" + stray "자"
     const NOISE_BY_LENGTH = [...NOISE_WORDS].sort((a, b) => b.length - a.length);
@@ -817,7 +849,12 @@
 
     const tokens = [];
     text.split(/\r?\n/).forEach(line => {
-      line.split(/[,，:：]/).forEach(part => tokens.push(part));
+      // a photographed sheet sometimes has two numbered entries OCR'd onto one
+      // line (side-by-side columns) — split those apart before the usual
+      // per-line tokenizing, e.g. "1. 홍길동  2. 김철수" -> two entries.
+      line.split(/(?=(?:^|\s)\d{1,3}[.)]\s)/).forEach(part => {
+        part.split(/[,，:：]/).forEach(p => tokens.push(p));
+      });
     });
 
     const names = [];
@@ -828,18 +865,27 @@
       tok = tok.replace(/^[\s\-*•]*\d{1,3}[.)]\s*/, '').trim(); // leading "1." / "2)" numbering
       tok = tok.replace(/^[-*•]\s*/, '').trim();
       tok = tok.replace(/\s*[(（][^)）]*[)）]\s*$/, '').trim(); // trailing "(초급)" style annotation
-      tok = tok.replace(/\s+/g, ' ');
       if (!tok) return;
-      // Tesseract's Korean OCR often reads a word as one space-separated Hangul
-      // syllable per token (e.g. "홍 길 동" instead of "홍길동") — collapse that
-      // back into a single word rather than leaving stray spaces in a name.
-      const hangulParts = tok.split(' ');
-      if (hangulParts.length > 1 && hangulParts.every(p => p.length === 1 && /[가-힣]/.test(p))) {
-        tok = hangulParts.join('');
-      }
-      if (/^[\d\s.\-_/()]+$/.test(tok)) return; // pure numbers/symbols
+      // Tesseract's Korean OCR very often reads a word as one space-separated
+      // character per token (e.g. "홍 길 동" instead of "홍길동", or
+      // "안 유 현 / 남 /87/ 동 탄" instead of "안유현/남/87/동탄") — names in
+      // these lists never legitimately contain spaces, so just squeeze them all out.
+      tok = tok.replace(/\s+/g, '');
+      if (!tok) return;
+      // KakaoTalk-style attendance/poll exports read as "이름/성별/생년/지역"
+      // — the name is always the first slash-delimited field.
+      if (tok.includes('/')) tok = tok.split('/')[0];
+      // a badge/profile-icon next to the name is sometimes misread as a
+      // stray leading symbol or letter fused onto the name (e.g. "@안유현",
+      // "(m김종해") — drop up to a few such junk characters before a name.
+      tok = tok.replace(/^[^가-힣]{1,3}(?=[가-힣]{2,})/, '');
       if (tok.length < 2 || tok.length > 12) return;
-      if (isPureNoisePhrase(tok.replace(/\s+/g, ''))) return; // header row, e.g. "참가신청명단" / "번호 이름"
+      // a real name has at least two Hangul syllables or two Latin letters —
+      // rejects status-bar/UI-chrome fragments (clock, signal/wifi glyphs,
+      // stray punctuation) that pure symbol-matching alone let through.
+      const hangulCount = (tok.match(/[가-힣]/g) || []).length;
+      if (hangulCount < 2 && !/[a-zA-Z]{2,}/.test(tok)) return;
+      if (isPureNoisePhrase(tok)) return; // header row, e.g. "참가신청명단" / "번호이름"
       if (seen.has(tok)) return;
       seen.add(tok);
       names.push(tok);
@@ -1149,10 +1195,13 @@
       teams.push([a, partner]);
     }
 
+    // group teams of similar strength together (strong-vs-strong, mid-vs-mid,
+    // weak-vs-weak) by pairing neighbors in level-sum order, instead of
+    // strongest-vs-weakest.
     const bySum = [...teams].sort((t1, t2) => (t2[0].level + t2[1].level) - (t1[0].level + t1[1].level));
     const matches = [];
-    for (let i = 0; i < bySum.length / 2; i++) {
-      matches.push([bySum[i], bySum[bySum.length - 1 - i]]);
+    for (let i = 0; i < bySum.length - 1; i += 2) {
+      matches.push([bySum[i], bySum[i + 1]]);
     }
     return matches;
   }
@@ -1303,6 +1352,13 @@
     if (!chip) return;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', chip.dataset.loc);
+    // defer so the drag ghost image is captured before the style changes
+    requestAnimationFrame(() => chip.classList.add('dragging'));
+  });
+
+  scheduleContent.addEventListener('dragend', (e) => {
+    const chip = e.target.closest('.player-chip');
+    if (chip) chip.classList.remove('dragging');
   });
 
   scheduleContent.addEventListener('dragover', (e) => {
@@ -1353,6 +1409,8 @@
     resultsContent.innerHTML = rounds.length ? html : `<p class="empty-hint">입력할 경기가 없습니다.</p>`;
   }
 
+  let scoreAdvanceTimer = null;
+
   resultsContent.addEventListener('input', (e) => {
     const input = e.target.closest('.score-box');
     if (!input) return;
@@ -1360,6 +1418,25 @@
     resultsState[key] = resultsState[key] || {};
     resultsState[key][input.dataset.side] = input.value.trim();
     saveState();
+
+    clearTimeout(scoreAdvanceTimer);
+    if (!input.value) return; // backspace/clear: stay put
+
+    const boxes = Array.from(resultsContent.querySelectorAll('.score-box'));
+    const next = boxes[boxes.indexOf(input) + 1];
+    if (!next) return;
+
+    // full (e.g. 2-digit) entry jumps right away; a single digit waits a
+    // beat in case the player is about to type a second one.
+    if (input.value.length >= input.maxLength) {
+      next.focus();
+      next.select();
+    } else {
+      scoreAdvanceTimer = setTimeout(() => {
+        next.focus();
+        next.select();
+      }, 500);
+    }
   });
 
   function buildResultsText() {
@@ -1460,6 +1537,7 @@
         statusEl.textContent = result.ok ? '깃에 저장됨 ✓' : '깃 저장 실패';
         setTimeout(() => { statusEl.textContent = ''; }, 4000);
       }
+      if (result.ok) refreshHistoryDates();
     }
 
     const today = new Date().toISOString().slice(0, 10);
@@ -1483,6 +1561,56 @@
     viewStatsBtn.style.display = '';
     viewStatsBtn.addEventListener('click', () => {
       window.open(`${RESULTS_WORKER_URL}/stats`, '_blank');
+    });
+  }
+
+  // "지난 결과 불러오기": lists every date already committed to results/*.txt
+  // (via the Worker's GET /results) and, on request, fetches that date's saved
+  // text back (GET /results/<date>) and shows it read-only — the same text
+  // that "결과 텍스트로 저장" produced and committed to Git for that day.
+  const historyCard = document.getElementById('historyCard');
+  const historyDateSelect = document.getElementById('historyDateSelect');
+  const historyContent = document.getElementById('historyContent');
+  const historyStatus = document.getElementById('historyStatus');
+
+  async function refreshHistoryDates() {
+    try {
+      const resp = await fetch(`${RESULTS_WORKER_URL}/results`);
+      if (!resp.ok) return;
+      const { dates } = await resp.json();
+      if (!Array.isArray(dates) || dates.length === 0) {
+        historyDateSelect.innerHTML = '<option value="">저장된 결과가 없어요</option>';
+        return;
+      }
+      historyDateSelect.innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
+    } catch (err) {
+      // offline/blocked — leave whatever options were already there
+    }
+  }
+
+  async function loadHistoryDate(date) {
+    if (!date) return;
+    historyStatus.textContent = '불러오는 중…';
+    historyContent.innerHTML = '';
+    try {
+      const resp = await fetch(`${RESULTS_WORKER_URL}/results/${encodeURIComponent(date)}`);
+      const data = await resp.json();
+      if (!resp.ok) {
+        historyStatus.textContent = data.error === 'Not found' ? '해당 날짜의 결과가 없어요' : '불러오기 실패';
+        return;
+      }
+      historyContent.innerHTML = `<pre>${escapeHtml(data.content)}</pre>`;
+      historyStatus.textContent = '';
+    } catch (err) {
+      historyStatus.textContent = '불러오기 실패 (네트워크 확인)';
+    }
+  }
+
+  if (RESULTS_WORKER_URL) {
+    historyCard.style.display = 'block';
+    refreshHistoryDates();
+    document.getElementById('loadHistoryBtn').addEventListener('click', () => {
+      loadHistoryDate(historyDateSelect.value);
     });
   }
 

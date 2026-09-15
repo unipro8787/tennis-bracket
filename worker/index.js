@@ -543,16 +543,50 @@ function renderStatsHtml(players, awards, markdown) {
 </body></html>`;
 }
 
-// ---- fetch + routing ----
+// ---- results history (list saved dates + load one date's saved text back) ----
 
-async function fetchResultFiles(env) {
+async function listResultEntries(env) {
   const listUrl = `https://api.github.com/repos/${OWNER}/${REPO}/contents/results`;
   const listResp = await fetch(listUrl, { headers: ghHeaders(env) });
   if (listResp.status === 404) return [];
   if (!listResp.ok) throw new Error(`GitHub list error: ${await listResp.text()}`);
-
   const entries = await listResp.json();
-  const txtFiles = entries.filter(e => e.type === 'file' && e.name.endsWith('.txt'));
+  return entries.filter(e => e.type === 'file' && e.name.endsWith('.txt'));
+}
+
+async function handleListResultDates(env, origin) {
+  const headers = { ...corsHeaders(origin), 'Content-Type': 'application/json; charset=utf-8' };
+  try {
+    const entries = await listResultEntries(env);
+    const dates = entries.map(e => e.name.replace(/\.txt$/, '')).sort().reverse();
+    return new Response(JSON.stringify({ dates }), { status: 200, headers });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: String(e.message || e) }), { status: 502, headers });
+  }
+}
+
+async function handleGetResultDate(env, origin, date) {
+  const headers = { ...corsHeaders(origin), 'Content-Type': 'application/json; charset=utf-8' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return new Response(JSON.stringify({ error: 'Invalid date' }), { status: 400, headers });
+  }
+  const apiUrl = `https://api.github.com/repos/${OWNER}/${REPO}/contents/results/${date}.txt`;
+  const getResp = await fetch(apiUrl, { headers: ghHeaders(env) });
+  if (getResp.status === 404) {
+    return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers });
+  }
+  if (!getResp.ok) {
+    return new Response(JSON.stringify({ error: `GitHub error: ${await getResp.text()}` }), { status: 502, headers });
+  }
+  const info = await getResp.json();
+  const content = base64ToUtf8(info.content.replace(/\n/g, ''));
+  return new Response(JSON.stringify({ date, content }), { status: 200, headers });
+}
+
+// ---- fetch + routing ----
+
+async function fetchResultFiles(env) {
+  const txtFiles = await listResultEntries(env);
 
   const files = await Promise.all(txtFiles.map(async (entry) => {
     const fileResp = await fetch(entry.url, { headers: ghHeaders(env) });
@@ -590,6 +624,13 @@ export default {
     }
     if (url.pathname === '/stats' && request.method === 'GET') {
       return handleStats(env);
+    }
+    if (url.pathname === '/results' && request.method === 'GET') {
+      return handleListResultDates(env, origin);
+    }
+    const resultDateMatch = url.pathname.match(/^\/results\/([^/]+)$/);
+    if (resultDateMatch && request.method === 'GET') {
+      return handleGetResultDate(env, origin, decodeURIComponent(resultDateMatch[1]));
     }
     if (url.pathname === '/state' && request.method === 'GET') {
       return handleGetState(env, origin);
