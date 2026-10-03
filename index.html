@@ -241,6 +241,19 @@
     font-size: 0.95rem;
   }
   .option-field input[type="number"]:focus-visible { outline: 2px solid var(--court-green); outline-offset: -1px; }
+  .option-field.wide { flex: 1 1 240px; min-width: 0; }
+  .option-field input[type="text"] {
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 0.95rem;
+  }
+  .option-field input[type="text"]:focus-visible { outline: 2px solid var(--court-green); outline-offset: -1px; }
+  .option-hint { font-size: 0.78rem; color: var(--muted); min-height: 1.2em; }
+  .option-hint .warn { color: var(--clay); }
 
   @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   .round-block { margin-bottom: 18px; animation: rise 0.25s ease both; }
@@ -437,6 +450,11 @@
         <label for="gamesInput">인당 보장 경기 수</label>
         <input type="number" id="gamesInput" min="1" value="3" placeholder="자동">
       </div>
+      <div class="option-field wide">
+        <label for="noRestInput">미휴식자 (쉬지 않고 매 라운드 출전)</label>
+        <input type="text" id="noRestInput" placeholder="예: 홍길동, 김철수" autocomplete="off">
+        <span class="option-hint" id="noRestHint"></span>
+      </div>
     </div>
     <div class="row-actions" style="margin-top:18px;">
       <button class="btn btn-accent" id="formScheduleBtn" type="button">대진표 생성하기</button>
@@ -541,6 +559,7 @@
       players,
       courts: document.getElementById('courtsInput').value,
       games: document.getElementById('gamesInput').value,
+      noRest: document.getElementById('noRestInput').value,
       scheduleVisible: scheduleCard.style.display !== 'none',
       resultsVisible: resultsCard.style.display !== 'none',
       lastTotalPlayers,
@@ -560,6 +579,7 @@
   // separate storage sandboxes like the KakaoTalk in-app browser vs. Safari —
   // ends up showing the same roster/schedule/scores.
   function saveState() {
+    renderNoRestHint();
     const state = buildStateObject();
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -622,6 +642,8 @@
 
     if (state.courts) document.getElementById('courtsInput').value = state.courts;
     if (state.games) document.getElementById('gamesInput').value = state.games;
+    document.getElementById('noRestInput').value = state.noRest || '';
+    renderNoRestHint();
 
     // each slot entry is either a plain rowId (older saved state, before
     // per-occurrence renames existed) or { rowId, name } carrying a name
@@ -973,8 +995,37 @@
     }
   });
 
-  document.getElementById('courtsInput').addEventListener('input', () => saveState());
+  document.getElementById('courtsInput').addEventListener('input', () => { renderNoRestHint(); saveState(); });
   document.getElementById('gamesInput').addEventListener('input', () => saveState());
+  document.getElementById('noRestInput').addEventListener('input', () => { renderNoRestHint(); saveState(); });
+
+  // 미휴식자 입력칸: 쉼표·줄바꿈으로 구분한 이름 목록. 띄어쓰기로만 구분한 경우도
+  // 받아 주되, "김 철수"처럼 띄어쓰기가 들어간 명단 이름은 통째로 먼저 맞춰 본다.
+  function resolveNoRest(players) {
+    const names = new Set(players.map(p => p.name));
+    const wanted = [];
+    document.getElementById('noRestInput').value.split(/[,，、\n]+/).forEach(chunk => {
+      const t = chunk.trim();
+      if (!t) return;
+      if (names.has(t)) wanted.push(t);
+      else t.split(/\s+/).forEach(w => wanted.push(w));
+    });
+    const uniq = [...new Set(wanted)];
+    return { matched: uniq.filter(n => names.has(n)), unknown: uniq.filter(n => !names.has(n)) };
+  }
+
+  function renderNoRestHint() {
+    const hint = document.getElementById('noRestHint');
+    const { matched, unknown } = resolveNoRest(getPlayers());
+    const courts = Math.max(1, parseInt(document.getElementById('courtsInput').value) || 1);
+    const perRound = Math.min(courts, Math.floor(getPlayers().length / 4)) * 4;
+    const parts = [];
+    if (matched.length) parts.push(`휴식 제외: ${matched.map(escapeHtml).join(', ')}`);
+    if (unknown.length) parts.push(`<span class="warn">명단에 없는 이름: ${unknown.map(escapeHtml).join(', ')}</span>`);
+    const restSlots = getPlayers().length - perRound;
+    if (perRound > 0 && restSlots > 0 && matched.length >= perRound) parts.push(`<span class="warn">미휴식자가 한 라운드 출전 인원(${perRound}명) 이상이라, 나머지 선수도 뛸 수 있게 평소처럼 돌아가며 쉬어요</span>`);
+    hint.innerHTML = parts.join(' · ');
+  }
 
   function shuffle(arr) {
     const a = [...arr];
@@ -993,7 +1044,8 @@
     }
     const courts = Math.max(1, parseInt(document.getElementById('courtsInput').value) || 1);
     const targetGames = parseInt(document.getElementById('gamesInput').value) || 3;
-    const { rounds, courtsUsed } = buildRotatingSchedule(shuffle(players), courts, targetGames);
+    const noRest = new Set(resolveNoRest(players).matched);
+    const { rounds, courtsUsed } = buildRotatingSchedule(shuffle(players), courts, targetGames, noRest);
     renderSchedule(rounds, players.length, courts, courtsUsed);
 
     lastRounds = rounds;
@@ -1129,7 +1181,10 @@
 
   // every round, the players who've played the most (and rested the least) sit out,
   // and everyone still on court gets a fresh partner each time.
-  function buildRotatingSchedule(players, courts, targetGames) {
+  // noRest(이름 Set)에 든 미휴식자는 휴식 후보에서 빠져 매 라운드 출전한다. 단, 미휴식자가
+  // 한 라운드 출전 인원 이상이면 나머지 선수가 매번 쉬기만 하고 한 경기도 못 뛰므로,
+  // 그때는 미휴식을 보장하지 않고 평소처럼 전원 돌아가며 쉰다.
+  function buildRotatingSchedule(players, courts, targetGames, noRest = new Set()) {
     const courtsUsed = Math.min(courts, Math.floor(players.length / 4));
     if (courtsUsed < 1) return { rounds: [], courtsUsed: 0 };
 
@@ -1140,15 +1195,21 @@
     // 이름 표기 순서(포/백 자리)가 한쪽으로 쏠리지 않도록 포 자리 배정 횟수를 추적
     const frontCount = new Map(players.map(p => [p.name, 0]));
 
+    const restCount = players.length - perRound;
+    const honorNoRest = players.filter(p => !noRest.has(p.name)).length > restCount;
+
     const rounds = [];
     let safety = 300;
     while (players.some(p => gamesPlayed.get(p.name) < targetGames) && safety-- > 0) {
-      const order = [...players].sort((a, b) => {
+      const byRestPriority = (a, b) => {
         const byGames = gamesPlayed.get(b.name) - gamesPlayed.get(a.name);
         if (byGames !== 0) return byGames;
         return restsSoFar.get(a.name) - restsSoFar.get(b.name);
-      });
-      const restCount = players.length - perRound;
+      };
+      const order = honorNoRest
+        ? [...players.filter(p => !noRest.has(p.name)).sort(byRestPriority),
+           ...players.filter(p => noRest.has(p.name)).sort(byRestPriority)]
+        : [...players].sort(byRestPriority);
       const resting = order.slice(0, restCount);
       const playing = order.slice(restCount);
       resting.forEach(p => restsSoFar.set(p.name, restsSoFar.get(p.name) + 1));
@@ -1623,6 +1684,7 @@
     if (!hadLocal) {
       DEFAULT_PLAYERS.forEach(([n, l]) => addPlayerRow(n, l));
     }
+    renderNoRestHint();
 
     const serverState = await fetchServerState();
     if (serverState) {
