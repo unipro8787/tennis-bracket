@@ -19,6 +19,9 @@
     --card-bg: #ffffff;
     --border: #dde4da;
     --shadow: 0 1px 2px rgba(23, 36, 28, 0.04), 0 8px 24px rgba(23, 36, 28, 0.05);
+    --repeat-bg: #fff0b3;
+    --repeat-line: #e3b505;
+    --repeat-ink: #7a5c00;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -29,9 +32,15 @@
       --muted: #97a89d;
       --border: #293429;
       --shadow: 0 1px 2px rgba(0,0,0,0.2), 0 8px 24px rgba(0,0,0,0.24);
+      --repeat-bg: #45390c;
+      --repeat-line: #b8920a;
+      --repeat-ink: #ffd75e;
     }
   }
   :root[data-theme="dark"] {
+    --repeat-bg: #45390c;
+    --repeat-line: #b8920a;
+    --repeat-ink: #ffd75e;
     --court-green-soft: #163425;
     --bg: #10160f;
     --card-bg: #182018;
@@ -48,6 +57,9 @@
     --muted: #5f6f66;
     --border: #dde4da;
     --shadow: 0 1px 2px rgba(23, 36, 28, 0.04), 0 8px 24px rgba(23, 36, 28, 0.05);
+    --repeat-bg: #fff0b3;
+    --repeat-line: #e3b505;
+    --repeat-ink: #7a5c00;
   }
   * { box-sizing: border-box; }
   @media (prefers-reduced-motion: reduce) {
@@ -321,6 +333,25 @@
   .player-chip.selected { background: var(--court-green); color: #fff; }
   .player-chip.dragging { background: var(--court-green); color: #fff; opacity: 0.6; outline: 2px solid var(--court-green); outline-offset: 1px; }
   .player-chip.drag-over { background: var(--clay); color: #fff; outline: 2px dashed var(--clay); outline-offset: 1px; }
+  .pair { display: inline-block; white-space: nowrap; }
+  .pair.repeat {
+    background: var(--repeat-bg);
+    box-shadow: inset 0 0 0 1px var(--repeat-line);
+    border-radius: 7px;
+    padding: 1px 6px;
+  }
+  .pair-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: 5px;
+    background: var(--repeat-line);
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    vertical-align: 1px;
+  }
+  .repeat-legend { font-size: 0.78rem; color: var(--repeat-ink); margin-bottom: 10px; }
   .delete-match-btn {
     border: none;
     background: transparent;
@@ -1191,7 +1222,12 @@
     const perRound = courtsUsed * 4;
     const gamesPlayed = new Map(players.map(p => [p.name, 0]));
     const restsSoFar = new Map(players.map(p => [p.name, 0]));
-    const partnerHistory = new Map(players.map(p => [p.name, new Set()]));
+    // 이름 → (파트너 이름 → 같은 편이었던 횟수)
+    const partnerHistory = new Map(players.map(p => [p.name, new Map()]));
+    const addPartner = (x, y) => {
+      const m = partnerHistory.get(x);
+      m.set(y, (m.get(y) || 0) + 1);
+    };
     // 이름 표기 순서(포/백 자리)가 한쪽으로 쏠리지 않도록 포 자리 배정 횟수를 추적
     const frontCount = new Map(players.map(p => [p.name, 0]));
 
@@ -1219,10 +1255,10 @@
         const orderedA = orderByFrontBack(teamA, frontCount);
         const orderedB = orderByFrontBack(teamB, frontCount);
         [...orderedA, ...orderedB].forEach(p => gamesPlayed.set(p.name, gamesPlayed.get(p.name) + 1));
-        partnerHistory.get(orderedA[0].name).add(orderedA[1].name);
-        partnerHistory.get(orderedA[1].name).add(orderedA[0].name);
-        partnerHistory.get(orderedB[0].name).add(orderedB[1].name);
-        partnerHistory.get(orderedB[1].name).add(orderedB[0].name);
+        addPartner(orderedA[0].name, orderedA[1].name);
+        addPartner(orderedA[1].name, orderedA[0].name);
+        addPartner(orderedB[0].name, orderedB[1].name);
+        addPartner(orderedB[1].name, orderedB[0].name);
         return [orderedA, orderedB];
       });
 
@@ -1241,20 +1277,43 @@
     return [front, back];
   }
 
-  // pairs players for one round only (snake by level), preferring partners not used before
+  // pairs players for one round only. 가능한 짝 조합을 모두 살펴(인원이 많으면 탐색 상한까지)
+  // 1순위로 "이미 같은 편이었던 페어"가 가장 적은 조합을, 2순위로 팀 실력 합이 고른
+  // 조합(강한 선수 + 약한 선수)을 고른다. 같은 페어가 세 번째가 되는 건 두 번째보다
+  // 훨씬 무겁게 친다.
   function formRoundMatches(playing, partnerHistory) {
     const pool = [...playing].sort((a, b) => b.level - a.level);
-    const used = new Set();
-    const teams = [];
+    const n = pool.length;
+    const meanSum = pool.reduce((t, p) => t + p.level, 0) / (n / 2);
+    const timesPaired = (x, y) => partnerHistory.get(x.name).get(y.name) || 0;
+    const REPEAT_COST = 1000;
+    const pairCost = (x, y) => {
+      const c = timesPaired(x, y);
+      const sumDiff = x.level + y.level - meanSum;
+      return REPEAT_COST * c * (c + 1) / 2 + sumDiff * sumDiff;
+    };
 
-    while (used.size < pool.length) {
-      const a = pool.find(p => !used.has(p.name));
-      used.add(a.name);
-      const remaining = pool.filter(p => !used.has(p.name)).sort((x, y) => x.level - y.level);
-      const partner = remaining.find(p => !partnerHistory.get(a.name).has(p.name)) || remaining[0];
-      used.add(partner.name);
-      teams.push([a, partner]);
-    }
+    let best = null, bestCost = Infinity, nodes = 0;
+    const NODE_LIMIT = 200000;
+    const used = new Array(n).fill(false);
+    const cur = [];
+    (function search(cost) {
+      if (cost >= bestCost || nodes++ > NODE_LIMIT) return;
+      const i = used.indexOf(false);
+      if (i === -1) { best = cur.slice(); bestCost = cost; return; }
+      used[i] = true;
+      // 좋은 후보(반복 적고 실력 균형 맞는 짝)부터 시도해야 가지치기가 잘 된다
+      const cands = [];
+      for (let j = i + 1; j < n; j++) if (!used[j]) cands.push([j, pairCost(pool[i], pool[j])]);
+      cands.sort((u, v) => u[1] - v[1]);
+      for (const [j, c] of cands) {
+        used[j] = true; cur.push([pool[i], pool[j]]);
+        search(cost + c);
+        cur.pop(); used[j] = false;
+      }
+      used[i] = false;
+    })(0);
+    const teams = best;
 
     // group teams of similar strength together (strong-vs-strong, mid-vs-mid,
     // weak-vs-weak) by pairing neighbors in level-sum order, instead of
@@ -1282,7 +1341,23 @@
       html += `<p class="empty-hint">인원이 부족해 코트 ${courtsUsed}개만 사용합니다.</p>`;
     }
     html += `<p class="edit-hint">선수를 드래그하거나(PC) 두 번 탭해서(모바일) 자리를 맞바꿀 수 있고, 더블클릭하면 이름을 수정할 수 있어요. 게임을 지우려면 휴지통 아이콘을 누르세요.</p>`;
+    // 앞 라운드까지 같은 편이었던 횟수를 세어, 두 번째부터 하이라이트한다 (손으로 자리를
+    // 바꾼 뒤에도 다시 그리면 그 결과 기준으로 다시 센다)
+    const pairSeen = new Map();
+    const pairKey = (x, y) => [x.name, y.name].sort().join(' ');
+    let repeatCount = 0;
+    const teamHtml = (team, ri, mi, ti) => {
+      const k = pairKey(team[0], team[1]);
+      const nth = (pairSeen.get(k) || 0) + 1;
+      pairSeen.set(k, nth);
+      const chips = `${chipHtml(team[0].name, `${ri},${mi},${ti},0`)} · ${chipHtml(team[1].name, `${ri},${mi},${ti},1`)}`;
+      if (nth < 2) return `<span class="pair">${chips}</span>`;
+      repeatCount++;
+      return `<span class="pair repeat" title="이 두 사람은 오늘 ${nth}번째 같은 편이에요">${chips}<span class="pair-badge">${nth}번째</span></span>`;
+    };
+    let roundsHtml = '';
     rounds.forEach((round, ri) => {
+      let html = '';
       html += `<div class="round-block">`;
       html += `<span class="round-label">ROUND ${ri + 1}</span>`;
       if (round.resting.length > 0) {
@@ -1291,14 +1366,18 @@
       }
       html += `<div class="table-scroll"><table class="match-table"><thead><tr><th>코트</th><th>대진</th><th class="no-capture"></th></tr></thead><tbody>`;
       round.matches.forEach((m, mi) => {
-        const teamA = `${chipHtml(m[0][0].name, `${ri},${mi},0,0`)} · ${chipHtml(m[0][1].name, `${ri},${mi},0,1`)}`;
-        const teamB = `${chipHtml(m[1][0].name, `${ri},${mi},1,0`)} · ${chipHtml(m[1][1].name, `${ri},${mi},1,1`)}`;
+        const teamA = teamHtml(m[0], ri, mi, 0);
+        const teamB = teamHtml(m[1], ri, mi, 1);
         html += `<tr><td><span class="court-chip">${mi + 1}</span></td><td>${teamA} <strong>vs</strong> ${teamB}</td>` +
           `<td class="no-capture"><button type="button" class="delete-match-btn" data-del-ri="${ri}" data-del-mi="${mi}" title="이 게임 삭제">🗑</button></td></tr>`;
       });
       html += `</tbody></table></div></div>`;
+      roundsHtml += html;
     });
-    scheduleContent.innerHTML = html;
+    if (repeatCount > 0) {
+      html += `<p class="repeat-legend"><span class="pair repeat">노란 칸</span>은 앞 라운드에서 이미 같은 편이었던 페어예요. 인원·경기 수 때문에 피할 수 없어 다시 묶였어요 (${repeatCount}팀).</p>`;
+    }
+    scheduleContent.innerHTML = html + roundsHtml;
   }
 
   function getPlayerAtLoc(loc) {
