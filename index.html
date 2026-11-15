@@ -486,6 +486,16 @@
         <input type="text" id="noRestInput" placeholder="예: 홍길동, 김철수" autocomplete="off">
         <span class="option-hint" id="noRestHint"></span>
       </div>
+      <div class="option-field wide">
+        <label for="lateInput">지각자 (첫 경기 우선 휴식)</label>
+        <input type="text" id="lateInput" placeholder="예: 홍길동, 김철수" autocomplete="off">
+        <span class="option-hint" id="lateHint"></span>
+      </div>
+      <div class="option-field wide">
+        <label for="earlyInput">조기퇴근자 (마지막 경기 우선 휴식)</label>
+        <input type="text" id="earlyInput" placeholder="예: 홍길동, 김철수" autocomplete="off">
+        <span class="option-hint" id="earlyHint"></span>
+      </div>
     </div>
     <div class="row-actions" style="margin-top:18px;">
       <button class="btn btn-accent" id="formScheduleBtn" type="button">대진표 생성하기</button>
@@ -591,6 +601,8 @@
       courts: document.getElementById('courtsInput').value,
       games: document.getElementById('gamesInput').value,
       noRest: document.getElementById('noRestInput').value,
+      late: document.getElementById('lateInput').value,
+      early: document.getElementById('earlyInput').value,
       scheduleVisible: scheduleCard.style.display !== 'none',
       resultsVisible: resultsCard.style.display !== 'none',
       lastTotalPlayers,
@@ -674,6 +686,8 @@
     if (state.courts) document.getElementById('courtsInput').value = state.courts;
     if (state.games) document.getElementById('gamesInput').value = state.games;
     document.getElementById('noRestInput').value = state.noRest || '';
+    document.getElementById('lateInput').value = state.late || '';
+    document.getElementById('earlyInput').value = state.early || '';
     renderNoRestHint();
 
     // each slot entry is either a plain rowId (older saved state, before
@@ -1028,14 +1042,15 @@
 
   document.getElementById('courtsInput').addEventListener('input', () => { renderNoRestHint(); saveState(); });
   document.getElementById('gamesInput').addEventListener('input', () => saveState());
-  document.getElementById('noRestInput').addEventListener('input', () => { renderNoRestHint(); saveState(); });
+  ['noRestInput', 'lateInput', 'earlyInput'].forEach(id =>
+    document.getElementById(id).addEventListener('input', () => { renderNoRestHint(); saveState(); }));
 
-  // 미휴식자 입력칸: 쉼표·줄바꿈으로 구분한 이름 목록. 띄어쓰기로만 구분한 경우도
-  // 받아 주되, "김 철수"처럼 띄어쓰기가 들어간 명단 이름은 통째로 먼저 맞춰 본다.
-  function resolveNoRest(players) {
+  // 미휴식자·지각자·조기퇴근자 입력칸: 쉼표·줄바꿈으로 구분한 이름 목록. 띄어쓰기로만
+  // 구분한 경우도 받아 주되, "김 철수"처럼 띄어쓰기가 들어간 명단 이름은 통째로 먼저 맞춰 본다.
+  function resolveNoRest(players, inputId = 'noRestInput') {
     const names = new Set(players.map(p => p.name));
     const wanted = [];
-    document.getElementById('noRestInput').value.split(/[,，、\n]+/).forEach(chunk => {
+    document.getElementById(inputId).value.split(/[,，、\n]+/).forEach(chunk => {
       const t = chunk.trim();
       if (!t) return;
       if (names.has(t)) wanted.push(t);
@@ -1056,6 +1071,18 @@
     const restSlots = getPlayers().length - perRound;
     if (perRound > 0 && restSlots > 0 && matched.length >= perRound) parts.push(`<span class="warn">미휴식자가 한 라운드 출전 인원(${perRound}명) 이상이라, 나머지 선수도 뛸 수 있게 평소처럼 돌아가며 쉬어요</span>`);
     hint.innerHTML = parts.join(' · ');
+
+    [['lateInput', 'lateHint', '첫 경기 휴식'], ['earlyInput', 'earlyHint', '마지막 경기 휴식']].forEach(([inputId, hintId, label]) => {
+      const r = resolveNoRest(getPlayers(), inputId);
+      const p = [];
+      if (r.matched.length) p.push(`${label}: ${r.matched.map(escapeHtml).join(', ')}`);
+      if (r.unknown.length) p.push(`<span class="warn">명단에 없는 이름: ${r.unknown.map(escapeHtml).join(', ')}</span>`);
+      if (r.matched.length && perRound > 0) {
+        if (restSlots <= 0) p.push(`<span class="warn">남는 인원이 없어 쉬는 사람이 없어요</span>`);
+        else if (r.matched.length > restSlots) p.push(`<span class="warn">한 라운드 휴식 자리가 ${restSlots}명이라, 먼저 적은 ${restSlots}명만 쉬어요</span>`);
+      }
+      document.getElementById(hintId).innerHTML = p.join(' · ');
+    });
   }
 
   function shuffle(arr) {
@@ -1076,7 +1103,9 @@
     const courts = Math.max(1, parseInt(document.getElementById('courtsInput').value) || 1);
     const targetGames = parseInt(document.getElementById('gamesInput').value) || 3;
     const noRest = new Set(resolveNoRest(players).matched);
-    const { rounds, courtsUsed } = buildRotatingSchedule(shuffle(players), courts, targetGames, noRest);
+    const late = resolveNoRest(players, 'lateInput').matched;
+    const early = resolveNoRest(players, 'earlyInput').matched;
+    const { rounds, courtsUsed } = buildRotatingSchedule(shuffle(players), courts, targetGames, noRest, late, early);
     renderSchedule(rounds, players.length, courts, courtsUsed);
 
     lastRounds = rounds;
@@ -1215,7 +1244,11 @@
   // noRest(이름 Set)에 든 미휴식자는 휴식 후보에서 빠져 매 라운드 출전한다. 단, 미휴식자가
   // 한 라운드 출전 인원 이상이면 나머지 선수가 매번 쉬기만 하고 한 경기도 못 뛰므로,
   // 그때는 미휴식을 보장하지 않고 평소처럼 전원 돌아가며 쉰다.
-  function buildRotatingSchedule(players, courts, targetGames, noRest = new Set()) {
+  // late(지각자)는 1라운드에, early(조기퇴근자)는 2라운드에 휴식 자리를 먼저 받고(휴식 자리보다
+  // 많으면 앞에 적은 순서대로), 다 만든 뒤 2라운드를 맨 뒤로 옮겨 조기퇴근자가 마지막 라운드에
+  // 쉬게 한다. 라운드 순서만 바꾸는 것이라 인당 경기 수·페어 반복 여부는 그대로다.
+  // 둘 다 미휴식자보다 우선한다(그 자리에 없으니 뛸 수 없다).
+  function buildRotatingSchedule(players, courts, targetGames, noRest = new Set(), late = [], early = []) {
     const courtsUsed = Math.min(courts, Math.floor(players.length / 4));
     if (courtsUsed < 1) return { rounds: [], courtsUsed: 0 };
 
@@ -1242,10 +1275,13 @@
         if (byGames !== 0) return byGames;
         return restsSoFar.get(a.name) - restsSoFar.get(b.name);
       };
-      const order = honorNoRest
-        ? [...players.filter(p => !noRest.has(p.name)).sort(byRestPriority),
-           ...players.filter(p => noRest.has(p.name)).sort(byRestPriority)]
-        : [...players].sort(byRestPriority);
+      const forcedNames = (rounds.length === 0 ? late : rounds.length === 1 ? early : []).slice(0, restCount);
+      const forced = forcedNames.map(n => players.find(p => p.name === n));
+      const others = players.filter(p => !forcedNames.includes(p.name));
+      const order = [...forced, ...(honorNoRest
+        ? [...others.filter(p => !noRest.has(p.name)).sort(byRestPriority),
+           ...others.filter(p => noRest.has(p.name)).sort(byRestPriority)]
+        : [...others].sort(byRestPriority))];
       const resting = order.slice(0, restCount);
       const playing = order.slice(restCount);
       resting.forEach(p => restsSoFar.set(p.name, restsSoFar.get(p.name) + 1));
@@ -1264,6 +1300,8 @@
 
       rounds.push({ matches, resting });
     }
+    // 조기퇴근자가 쉬도록 짠 2라운드를 맨 뒤로 (라운드가 2개뿐이면 이미 마지막)
+    if (early.length && restCount > 0 && rounds.length > 2) rounds.push(rounds.splice(1, 1)[0]);
     return { rounds, courtsUsed };
   }
 
