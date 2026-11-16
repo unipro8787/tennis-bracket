@@ -526,6 +526,7 @@
     <div class="row-actions" style="align-items:center;">
       <select id="historyDateSelect"></select>
       <button class="btn btn-secondary" id="loadHistoryBtn" type="button">불러오기</button>
+      <button class="btn btn-accent" id="historyStatsBtn" type="button">통계 보기 · 수상자</button>
       <span id="historyStatus" style="font-size:0.82rem; color:var(--muted);"></span>
     </div>
     <div id="historyContent" style="margin-top:14px;"></div>
@@ -1791,6 +1792,10 @@
     refreshHistoryDates();
     document.getElementById('loadHistoryBtn').addEventListener('click', () => {
       loadHistoryDate(historyDateSelect.value);
+    });
+    // 지금까지 저장된 모든 결과로 집계한 어워드(수상자)·순위 페이지. Worker가 열 때마다 새로 집계한다
+    document.getElementById('historyStatsBtn').addEventListener('click', () => {
+      window.open(`${RESULTS_WORKER_URL}/stats`, '_blank');
     });
   }
 
