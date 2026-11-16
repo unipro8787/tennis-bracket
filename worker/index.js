@@ -134,11 +134,12 @@ async function handleSaveState(request, env, origin) {
 function parseResultsFile(text) {
   const events = [];
   const rests = [];
+  const attendees = new Set(); // 그날 나온 사람 전원 (휴식·미정 경기 포함) — 개근상용
   for (const rawLine of text.split('\n')) {
     const line = rawLine.trim();
     const restMatch = line.match(/^휴식:\s*(.+)$/);
     if (restMatch) {
-      restMatch[1].split(',').map(s => s.trim()).filter(Boolean).forEach(n => rests.push(n));
+      restMatch[1].split(',').map(s => s.trim()).filter(Boolean).forEach(n => { rests.push(n); attendees.add(n); });
       continue;
     }
     const m = line.match(/^\[코트\s*\d+\]\s*(.+?)\s+vs\s+(.+?)\s*→\s*승:\s*(.+)$/);
@@ -148,6 +149,7 @@ function parseResultsFile(text) {
     const outcome = m[3].trim();
     const teamA = teamAStr.split('·').map(s => s.trim()).filter(Boolean);
     const teamB = teamBStr.split('·').map(s => s.trim()).filter(Boolean);
+    [...teamA, ...teamB].forEach(n => attendees.add(n));
     if (teamA.length !== 2 || teamB.length !== 2) continue;
 
     let winner = null;
@@ -162,13 +164,13 @@ function parseResultsFile(text) {
 
     events.push({ teamA, teamB, winner, scoreA, scoreB });
   }
-  return { events, rests };
+  return { events, rests, attendees };
 }
 
 function ensurePlayer(stats, name) {
   if (!stats.has(name)) {
     stats.set(name, {
-      name, games: 0, wins: 0, losses: 0, draws: 0, rests: 0,
+      name, games: 0, wins: 0, losses: 0, draws: 0, rests: 0, days: 0, pointDiff: 0,
       closeGames: 0, closeWins: 0,
       h1Games: 0, h1Wins: 0, h2Games: 0, h2Wins: 0,
     });
@@ -199,14 +201,19 @@ function buildAggregates(files) {
   }
 
   files.forEach(({ date, content }) => {
-    const { events, rests } = parseResultsFile(content);
+    const { events, rests, attendees } = parseResultsFile(content);
     rests.forEach(n => { ensurePlayer(stats, n).rests++; });
+    attendees.forEach(n => { ensurePlayer(stats, n).days++; });
     const h = date ? half(date) : null;
 
     events.forEach(({ teamA, teamB, winner, scoreA, scoreB }) => {
       const all = [...teamA, ...teamB];
 
       all.forEach(n => { ensurePlayer(stats, n).games++; });
+      if (scoreA !== null && scoreB !== null) {
+        teamA.forEach(n => { ensurePlayer(stats, n).pointDiff += scoreA - scoreB; });
+        teamB.forEach(n => { ensurePlayer(stats, n).pointDiff += scoreB - scoreA; });
+      }
 
       [teamA, teamB].forEach(([p1, p2]) => {
         const key = pairKey(p1, p2);
@@ -264,9 +271,19 @@ function pct(r, digits = 0) {
 
 // ---- awards ----
 
-function computeAwards(players, pairs, h2h) {
+// best-first 정렬 기준 cmp로 1등과 비기는(cmp === 0) 후보를 모두 돌려준다 → 공동 수상
+function topTies(items, cmp) {
+  if (!items.length) return [];
+  const sorted = [...items].sort(cmp);
+  return sorted.filter(x => cmp(x, sorted[0]) === 0);
+}
+
+function computeAwards(players, pairs, h2h, totalDates) {
   const eligible = players.filter(p => p.games >= MIN_TOTAL_GAMES);
   const eligibleNames = new Set(eligible.map(p => p.name));
+
+  // 개근상: 출석한 날짜 수가 가장 많은 회원 (경기 수 기준 아님, 공동 수상)
+  const perfectAttendance = topTies(players.filter(p => p.days > 0), (a, b) => b.days - a.days);
 
   const attendance = [...eligible].sort((a, b) => b.games - a.games).slice(0, 3);
 
@@ -276,169 +293,119 @@ function computeAwards(players, pairs, h2h) {
     .sort((a, b) => b.rate - a.rate || b.p.wins - a.p.wins)
     .slice(0, 3);
 
+  // MVP: 전체 날짜의 절반 이상 나온 회원 중 승률 1위, 같으면 득실차
+  const mvpMinDays = Math.ceil(totalDates / 2);
+  const mvp = topTies(
+    eligible.filter(p => p.days >= mvpMinDays).map(p => ({ p, rate: rate(p.wins, decided(p)) })).filter(x => x.rate !== null),
+    (a, b) => (b.rate - a.rate) || (b.p.pointDiff - a.p.pointDiff),
+  );
+
+  // 같은 승률이면 함께 뛴 경기가 많은 쪽(근거가 많은 쪽)이 앞선다. 승률·경기 수가 같으면 공동
   const pairCandidates = pairs
     .filter(pr => pr.games >= MIN_PAIR_GAMES && eligibleNames.has(pr.players[0]) && eligibleNames.has(pr.players[1]))
     .map(pr => ({ ...pr, rate: rate(pr.wins, pr.games) }));
-  const bestPair = pairCandidates.length
-    ? pairCandidates.reduce((a, b) => (b.rate > a.rate ? b : a)) : null;
-  const worstPair = pairCandidates.length
-    ? pairCandidates.reduce((a, b) => (b.rate < a.rate ? b : a)) : null;
+  const bestPair = topTies(pairCandidates, (a, b) => (b.rate - a.rate) || (b.games - a.games));
+  const worstPair = topTies(pairCandidates, (a, b) => (a.rate - b.rate) || (b.games - a.games));
 
-  const closeCandidates = eligible
-    .map(p => ({ p, games: p.closeGames, rate: rate(p.closeWins, p.closeGames) }))
-    .filter(x => x.games >= MIN_CLOSE_GAMES);
-  const closeMental = closeCandidates.length
-    ? closeCandidates.reduce((a, b) => (b.rate > a.rate ? b : a)) : null;
+  const closeMental = topTies(
+    eligible.map(p => ({ p, games: p.closeGames, rate: rate(p.closeWins, p.closeGames) })).filter(x => x.games >= MIN_CLOSE_GAMES),
+    (a, b) => (b.rate - a.rate) || (b.games - a.games),
+  );
 
-  const mipCandidates = eligible
-    .map(p => {
-      const r1 = rate(p.h1Wins, p.h1Games);
-      const r2 = rate(p.h2Wins, p.h2Games);
-      const delta = (r1 !== null && r2 !== null) ? r2 - r1 : null;
-      return { p, r1, r2, delta };
-    })
-    .filter(x => x.delta !== null && x.p.h1Games >= MIN_HALF_GAMES && x.p.h2Games >= MIN_HALF_GAMES);
-  const mip = mipCandidates.length
-    ? mipCandidates.reduce((a, b) => (b.delta > a.delta ? b : a)) : null;
+  const mip = topTies(
+    eligible
+      .map(p => {
+        const r1 = rate(p.h1Wins, p.h1Games);
+        const r2 = rate(p.h2Wins, p.h2Games);
+        const delta = (r1 !== null && r2 !== null) ? r2 - r1 : null;
+        return { p, r1, r2, delta };
+      })
+      .filter(x => x.delta !== null && x.p.h1Games >= MIN_HALF_GAMES && x.p.h2Games >= MIN_HALF_GAMES),
+    (a, b) => b.delta - a.delta,
+  );
 
-  const h2hCandidates = h2h
-    .filter(e => e.games >= MIN_H2H_GAMES && eligibleNames.has(e.x) && eligibleNames.has(e.y))
-    .map(e => ({ ...e, rate: rate(e.wins, e.games) }));
-  const nemesis = h2hCandidates.length
-    ? h2hCandidates.reduce((a, b) => (b.rate > a.rate ? b : a)) : null;
+  const nemesis = topTies(
+    h2h.filter(e => e.games >= MIN_H2H_GAMES && eligibleNames.has(e.x) && eligibleNames.has(e.y))
+      .map(e => ({ ...e, rate: rate(e.wins, e.games) })),
+    (a, b) => (b.rate - a.rate) || (b.games - a.games),
+  );
 
-  return { attendance, winRateTop, bestPair, worstPair, closeMental, mip, nemesis };
+  return { totalDates, mvpMinDays, perfectAttendance, mvp, attendance, winRateTop, bestPair, worstPair, closeMental, mip, nemesis };
 }
 
 const MEDALS = ['🥇', '🥈', '🥉'];
+const signed = n => (n > 0 ? `+${n}` : `${n}`);
+
+// 상 하나의 정의: 수상자 줄(텍스트) 목록, 소개 문구, 비었을 때 문구.
+// 마크다운과 HTML 카드가 같은 정의를 쓴다.
+function awardSections(a) {
+  const co = list => (list.length > 1 ? ' (공동)' : '');
+  const pairLine = x => [`${x.players[0]} & ${x.players[1]}`, `${x.games}전 ${x.wins}승 (승률 ${pct(x.rate)})`];
+  return [
+    { emoji: '🏅', title: `개근상${co(a.perfectAttendance)}`,
+      rows: a.perfectAttendance.map(p => [p.name, `${a.totalDates}회 중 ${p.days}회 출석`]),
+      quote: '비가 오나 눈이 오나 코트에 있던 분 🏅', empty: '집계할 데이터가 부족해요.' },
+    { emoji: '👑', title: `MVP${co(a.mvp)}`,
+      rows: a.mvp.map(x => [x.p.name, `승률 ${pct(x.rate)} (${x.p.wins}승 ${x.p.losses}패 ${x.p.draws}무) · 득실 ${signed(x.p.pointDiff)}`]),
+      quote: '올 시즌 코트의 주인공 👑', empty: `${a.mvpMinDays}회 이상 출석한 회원이 아직 없어요.`,
+      note: `${a.mvpMinDays}회 이상 출석한 회원 중 승률 1위, 같으면 득실차` },
+    { emoji: '🏟️', title: '코트의 지주 (출석왕)', medals: true,
+      rows: a.attendance.map(p => [p.name, `${p.games}경기`]),
+      quote: '코트가 곧 안방인 분들 🏠', empty: `최소 ${MIN_TOTAL_GAMES}경기를 채운 회원이 아직 없어요.` },
+    { emoji: '🏆', title: '승리 보증수표 (승률왕)', medals: true,
+      rows: a.winRateTop.map(x => [x.p.name, `${pct(x.rate)} (${x.p.wins}승 ${x.p.losses}패 ${x.p.draws}무)`]),
+      quote: '이 이름이 상대편에 보이면 오늘 코트는 접어야 합니다 😮‍💨', empty: '집계할 데이터가 부족해요.' },
+    { emoji: '🤝', title: `환상의 짝꿍 (베스트 케미)${co(a.bestPair)}`, rows: a.bestPair.map(pairLine),
+      quote: '이 조합이 뜨면 상대팀 표정부터 굳는다 🤝', empty: `함께 ${MIN_PAIR_GAMES}경기 이상 뛴 조합이 아직 없어요.` },
+    { emoji: '💔', title: `비운의 짝꿍 (워스트 케미)${co(a.worstPair)}`, rows: a.worstPair.map(pairLine),
+      quote: '친하긴 한데... 코트에서만은 따로 다니는 게 나을지도? 💔', empty: `함께 ${MIN_PAIR_GAMES}경기 이상 뛴 조합이 아직 없어요.` },
+    { emoji: '🧠', title: `강철 멘탈 (접전 강자)${co(a.closeMental)}`,
+      rows: a.closeMental.map(x => [x.p.name, `접전(1점 차 이내) ${x.games}전 승률 ${pct(x.rate)}`]),
+      quote: '듀스만 가면 눈빛이 달라지는 사람 🧠', empty: `접전 경기 표본(${MIN_CLOSE_GAMES}경기 이상)이 부족해요.` },
+    { emoji: '📈', title: `폭풍 성장상 (MIP)${co(a.mip)}`,
+      rows: a.mip.map(x => [x.p.name, `상반기 ${pct(x.r1)} → 하반기 ${pct(x.r2)} (+${pct(x.delta)}p)`]),
+      quote: '상반기의 그 사람이 아닙니다 📈', empty: `상/하반기 각각 ${MIN_HALF_GAMES}경기 이상 뛴 회원이 아직 없어요.` },
+    { emoji: '🏹', title: `천적 관계${co(a.nemesis)}`,
+      rows: a.nemesis.map(e => [`${e.x} ▶ ${e.y}`, `${e.games}전 ${e.wins}승 (승률 ${pct(e.rate)})`]),
+      quote: a.nemesis.length === 1 ? `${a.nemesis[0].y}님, ${a.nemesis[0].x}님만 만나면 유독 안 풀리시더라구요 🏹` : '만나기만 하면 승부가 기우는 상대들 🏹',
+      empty: `같은 상대와 ${MIN_H2H_GAMES}번 이상 맞붙은 기록이 아직 없어요.` },
+  ];
+}
 
 function renderAwardsMarkdown(awards) {
-  const L = [];
-  L.push('## 🎾 테니스 동호회 어워드 🎾', '');
-
-  L.push('### 🏟️ 코트의 지주 (출석왕)');
-  if (awards.attendance.length) {
-    L.push('| 순위 | 이름 | 경기 수 |', '|---|---|---|');
-    awards.attendance.forEach((p, i) => L.push(`| ${MEDALS[i] || i + 1} | ${p.name} | ${p.games}경기 |`));
-    L.push('> "코트가 곧 안방인 분들 🏠"');
-  } else {
-    L.push(`_최소 ${MIN_TOTAL_GAMES}경기를 채운 회원이 아직 없어요._`);
-  }
-  L.push('');
-
-  L.push('### 🏆 승리 보증수표 (승률왕)');
-  if (awards.winRateTop.length) {
-    L.push('| 순위 | 이름 | 승률 | 전적 |', '|---|---|---|---|');
-    awards.winRateTop.forEach((x, i) => {
-      L.push(`| ${MEDALS[i] || i + 1} | ${x.p.name} | ${pct(x.rate)} | ${x.p.wins}승 ${x.p.losses}패 ${x.p.draws}무 |`);
-    });
-    L.push('> "이 이름이 상대편에 보이면 오늘 코트는 접어야 합니다 😮‍💨"');
-  } else {
-    L.push('_집계할 데이터가 부족해요._');
-  }
-  L.push('');
-
-  L.push('### 🤝 환상의 짝꿍 (베스트 케미)');
-  if (awards.bestPair) {
-    const bp = awards.bestPair;
-    L.push(`**${bp.players[0]} & ${bp.players[1]}** — ${bp.games}전 ${bp.wins}승 (승률 ${pct(bp.rate)})`);
-    L.push('> "이 조합이 뜨면 상대팀 표정부터 굳는다 🤝"');
-  } else {
-    L.push(`_함께 ${MIN_PAIR_GAMES}경기 이상 뛴 조합이 아직 없어요._`);
-  }
-  L.push('');
-
-  L.push('### 💔 비운의 짝꿍 (워스트 케미)');
-  if (awards.worstPair) {
-    const wp = awards.worstPair;
-    L.push(`**${wp.players[0]} & ${wp.players[1]}** — ${wp.games}전 ${wp.wins}승 (승률 ${pct(wp.rate)})`);
-    L.push('> "친하긴 한데... 코트에서만은 따로 다니는 게 나을지도? 💔"');
-  } else {
-    L.push(`_함께 ${MIN_PAIR_GAMES}경기 이상 뛴 조합이 아직 없어요._`);
-  }
-  L.push('');
-
-  L.push('### 🧠 강철 멘탈 (접전 강자)');
-  if (awards.closeMental) {
-    const cm = awards.closeMental;
-    L.push(`**${cm.p.name}** — 접전(1점 차 이내) ${cm.games}전 승률 ${pct(cm.rate)}`);
-    L.push('> "듀스만 가면 눈빛이 달라지는 사람 🧠"');
-  } else {
-    L.push(`_접전 경기 표본(${MIN_CLOSE_GAMES}경기 이상)이 부족해요._`);
-  }
-  L.push('');
-
-  L.push('### 📈 폭풍 성장상 (MIP)');
-  if (awards.mip) {
-    const mp = awards.mip;
-    L.push(`**${mp.p.name}** — 상반기 승률 ${pct(mp.r1)} → 하반기 승률 ${pct(mp.r2)} (+${pct(mp.delta)}p)`);
-    L.push('> "상반기의 그 사람이 아닙니다 📈"');
-  } else {
-    L.push(`_상/하반기 각각 ${MIN_HALF_GAMES}경기 이상 뛴 회원이 아직 없어요._`);
-  }
-  L.push('');
-
-  L.push('### 🏹 천적 관계');
-  if (awards.nemesis) {
-    const nm = awards.nemesis;
-    L.push(`**${nm.x}** ▶ **${nm.y}** — ${nm.games}전 ${nm.wins}승 (승률 ${pct(nm.rate)})`);
-    L.push(`> "${nm.y}님, ${nm.x}님만 만나면 유독 안 풀리시더라구요 🏹"`);
-  } else {
-    L.push(`_같은 상대와 ${MIN_H2H_GAMES}번 이상 맞붙은 기록이 아직 없어요._`);
-  }
-  L.push('');
-  L.push(`_(최소 ${MIN_TOTAL_GAMES}경기 이상 참여한 회원 기준)_`);
-
+  const L = ['## 🎾 테니스 동호회 어워드 🎾', ''];
+  awardSections(awards).forEach(s => {
+    L.push(`### ${s.emoji} ${s.title}`);
+    if (!s.rows.length) {
+      L.push(`_${s.empty}_`);
+    } else {
+      s.rows.forEach(([who, detail], i) => L.push(`${s.medals ? (MEDALS[i] || `${i + 1}.`) : '-'} **${who}** — ${detail}`));
+      if (s.note) L.push(`_(${s.note})_`);
+      L.push(`> "${s.quote}"`);
+    }
+    L.push('');
+  });
+  L.push(`_(개근상 외에는 최소 ${MIN_TOTAL_GAMES}경기 이상 참여한 회원 기준)_`);
   return L.join('\n');
 }
 
 function renderAwardsCardsHtml(awards) {
-  function card(emoji, title, bodyHtml, quote, empty) {
+  const cards = awardSections(awards).map(s => {
+    let body = '';
+    if (s.rows.length) {
+      body = s.medals
+        ? `<ol class="medal-list">${s.rows.map(([who, detail], i) => `<li><span class="medal">${MEDALS[i] || i + 1}</span> ${escapeHtml(who)} <span class="stat">${escapeHtml(detail)}</span></li>`).join('')}</ol>`
+        : s.rows.map(([who, detail]) => `<p class="big"><strong>${escapeHtml(who)}</strong></p><p class="stat">${escapeHtml(detail)}</p>`).join('');
+      if (s.note) body += `<p class="stat note">${escapeHtml(s.note)}</p>`;
+    }
     return `<div class="award-card">
-      <h3>${emoji} ${escapeHtml(title)}</h3>
-      ${bodyHtml || `<p class="empty">${escapeHtml(empty)}</p>`}
-      ${bodyHtml && quote ? `<p class="quote">${escapeHtml(quote)}</p>` : ''}
+      <h3>${s.emoji} ${escapeHtml(s.title)}</h3>
+      ${body || `<p class="empty">${escapeHtml(s.empty)}</p>`}
+      ${body ? `<p class="quote">${escapeHtml(s.quote)}</p>` : ''}
     </div>`;
-  }
-
-  const attendanceBody = awards.attendance.length ? `<ol class="medal-list">${
-    awards.attendance.map((p, i) => `<li><span class="medal">${MEDALS[i] || i + 1}</span> ${escapeHtml(p.name)} <span class="stat">${p.games}경기</span></li>`).join('')
-  }</ol>` : '';
-
-  const winRateBody = awards.winRateTop.length ? `<ol class="medal-list">${
-    awards.winRateTop.map((x, i) => `<li><span class="medal">${MEDALS[i] || i + 1}</span> ${escapeHtml(x.p.name)} <span class="stat">${pct(x.rate)} (${x.p.wins}승 ${x.p.losses}패 ${x.p.draws}무)</span></li>`).join('')
-  }</ol>` : '';
-
-  const bestPairBody = awards.bestPair
-    ? `<p class="big"><strong>${escapeHtml(awards.bestPair.players[0])} &amp; ${escapeHtml(awards.bestPair.players[1])}</strong></p>
-       <p class="stat">${awards.bestPair.games}전 ${awards.bestPair.wins}승 (승률 ${pct(awards.bestPair.rate)})</p>` : '';
-
-  const worstPairBody = awards.worstPair
-    ? `<p class="big"><strong>${escapeHtml(awards.worstPair.players[0])} &amp; ${escapeHtml(awards.worstPair.players[1])}</strong></p>
-       <p class="stat">${awards.worstPair.games}전 ${awards.worstPair.wins}승 (승률 ${pct(awards.worstPair.rate)})</p>` : '';
-
-  const closeMentalBody = awards.closeMental
-    ? `<p class="big"><strong>${escapeHtml(awards.closeMental.p.name)}</strong></p>
-       <p class="stat">접전(1점 차 이내) ${awards.closeMental.games}전 승률 ${pct(awards.closeMental.rate)}</p>` : '';
-
-  const mipBody = awards.mip
-    ? `<p class="big"><strong>${escapeHtml(awards.mip.p.name)}</strong></p>
-       <p class="stat">상반기 ${pct(awards.mip.r1)} → 하반기 ${pct(awards.mip.r2)} (+${pct(awards.mip.delta)}p)</p>` : '';
-
-  const nemesisBody = awards.nemesis
-    ? `<p class="big"><strong>${escapeHtml(awards.nemesis.x)}</strong> ▶ <strong>${escapeHtml(awards.nemesis.y)}</strong></p>
-       <p class="stat">${awards.nemesis.games}전 ${awards.nemesis.wins}승 (승률 ${pct(awards.nemesis.rate)})</p>` : '';
-
-  return `<div class="award-grid">
-    ${card('🏟️', '코트의 지주 (출석왕)', attendanceBody, '코트가 곧 안방인 분들 🏠', `최소 ${MIN_TOTAL_GAMES}경기를 채운 회원이 아직 없어요.`)}
-    ${card('🏆', '승리 보증수표 (승률왕)', winRateBody, '이 이름이 상대편에 보이면 오늘 코트는 접어야 합니다 😮‍💨', '집계할 데이터가 부족해요.')}
-    ${card('🤝', '환상의 짝꿍 (베스트 케미)', bestPairBody, '이 조합이 뜨면 상대팀 표정부터 굳는다 🤝', `함께 ${MIN_PAIR_GAMES}경기 이상 뛴 조합이 아직 없어요.`)}
-    ${card('💔', '비운의 짝꿍 (워스트 케미)', worstPairBody, '친하긴 한데... 코트에서만은 따로 다니는 게 나을지도? 💔', `함께 ${MIN_PAIR_GAMES}경기 이상 뛴 조합이 아직 없어요.`)}
-    ${card('🧠', '강철 멘탈 (접전 강자)', closeMentalBody, '듀스만 가면 눈빛이 달라지는 사람 🧠', `접전 경기 표본(${MIN_CLOSE_GAMES}경기 이상)이 부족해요.`)}
-    ${card('📈', '폭풍 성장상 (MIP)', mipBody, '상반기의 그 사람이 아닙니다 📈', `상/하반기 각각 ${MIN_HALF_GAMES}경기 이상 뛴 회원이 아직 없어요.`)}
-    ${card('🏹', '천적 관계', nemesisBody, awards.nemesis ? `${awards.nemesis.y}님, ${awards.nemesis.x}님만 만나면 유독 안 풀리시더라구요 🏹` : '', `같은 상대와 ${MIN_H2H_GAMES}번 이상 맞붙은 기록이 아직 없어요.`)}
-  </div>
-  <p class="sub">(최소 ${MIN_TOTAL_GAMES}경기 이상 참여한 회원 기준)</p>`;
+  }).join('');
+  return `<div class="award-grid">${cards}</div>
+  <p class="sub">(개근상 외에는 최소 ${MIN_TOTAL_GAMES}경기 이상 참여한 회원 기준)</p>`;
 }
 
 function renderRankingTablesHtml(players) {
@@ -501,6 +468,7 @@ function renderStatsHtml(players, awards, markdown) {
   .award-card h3 { margin:0 0 10px; font-size:0.95rem; }
   .award-card .big { margin:4px 0 2px; font-size:1.02rem; }
   .award-card .stat { margin:0 0 4px; color:#3a473f; font-size:0.85rem; }
+  .award-card .note { color:#5f6f66; font-size:0.78rem; }
   .award-card .quote { margin:10px 0 0; font-size:0.8rem; color:#5f6f66; font-style:italic; }
   .award-card .empty { padding:0; font-size:0.85rem; }
   .medal-list { list-style:none; margin:0; padding:0; }
@@ -608,7 +576,7 @@ async function handleStats(env) {
     return new Response(String(e.message || e), { status: 502 });
   }
   const { players, pairs, h2h } = buildAggregates(files);
-  const awards = computeAwards(players, pairs, h2h);
+  const awards = computeAwards(players, pairs, h2h, files.length);
   const markdown = renderAwardsMarkdown(awards);
   const html = renderStatsHtml(players, awards, markdown);
   return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
