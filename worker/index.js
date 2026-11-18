@@ -14,6 +14,12 @@ const REPO = 'tennis-bracket';
 const ALLOWED_ORIGIN = 'https://unipro8787.github.io';
 
 // eligibility / sample-size floors for the awards below
+// 통계·수상 대상 회원 (단톡방 명단 기준, 2026-11-18)
+const MEMBERS = new Set([
+  '안유현', '우대원', '권수기', '남택원', '김종해', '이병일', '류병기',
+  '서승훈', '신동휘', '이희영', '최영열', '최종근', '허영주',
+]);
+
 const MIN_TOTAL_GAMES = 10; // "최소 10경기 이상 참여한 회원"
 const MIN_PAIR_GAMES = 5;   // 베스트/워스트 케미: 함께 뛴 경기 수
 const MIN_CLOSE_GAMES = 5;  // 강철 멘탈: 접전 경기 표본
@@ -575,7 +581,12 @@ async function handleStats(env) {
   } catch (e) {
     return new Response(String(e.message || e), { status: 502 });
   }
-  const { players, pairs, h2h } = buildAggregates(files);
+  const agg = buildAggregates(files);
+  // 통계·수상은 현재 회원만 대상 (게스트·탈퇴자 제외). 회원의 경기 기록은
+  // 파트너/상대가 비회원이어도 그대로 반영된다.
+  const players = agg.players.filter(p => MEMBERS.has(p.name));
+  const pairs = agg.pairs.filter(pr => pr.players.every(n => MEMBERS.has(n)));
+  const h2h = agg.h2h.filter(e => MEMBERS.has(e.x) && MEMBERS.has(e.y));
   const awards = computeAwards(players, pairs, h2h, files.length);
   const markdown = renderAwardsMarkdown(awards);
   const html = renderStatsHtml(players, awards, markdown);
